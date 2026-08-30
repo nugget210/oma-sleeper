@@ -158,13 +158,20 @@ Panel {
                  shortName:label || "", refreshMinutes:root.refreshMinutes,
                  colorMode:mode || root.colorMode,
                  playerDisplayMode:displayMode || root.playerDisplayMode}
-    root.settings = entry
+    if (root.hostWidget && typeof root.hostWidget.publishSettings === "function")
+      root.hostWidget.publishSettings(entry)
+    else root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
   function persist(rosterId, label) { saveEntry(root.leagueId, rosterId, label, root.colorMode, root.playerDisplayMode) }
   function setColorMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), mode, root.playerDisplayMode) }
   function setPlayerDisplayMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), root.colorMode, mode) }
+  function setPreviewScenario(scenario) {
+    if (root.hostWidget && typeof root.hostWidget.publishPreview === "function")
+      root.hostWidget.publishPreview(scenario)
+    else root.previewScenario = scenario
+  }
   function leagueIdFromInput(value) {
     var text = String(value || "").trim()
     var match = text.match(/(?:leagues\/)?(\d{10,})/)
@@ -191,7 +198,13 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        try { root.data = JSON.parse(String(text)); root.errorText = ""; if (root.settingsOpen) root.settingsMessage = "League synced — choose your fantasy team" }
+        try {
+          var result = JSON.parse(String(text))
+          if (root.hostWidget && typeof root.hostWidget.publishData === "function") root.hostWidget.publishData(result)
+          else root.data = result
+          root.errorText = ""
+          if (root.settingsOpen) root.settingsMessage = "League synced — choose your fantasy team"
+        }
         catch(e) { root.errorText = "Could not read matchup data" }
       }
     }
@@ -342,7 +355,7 @@ Panel {
                   border.width: 1
                   border.color: modelData.id === root.previewScenario ? Color.accent : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.18)
                   Text { id: previewLabel; anchors.centerIn: parent; text: modelData.label; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
-                  MouseArea { id: previewArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.previewScenario=modelData.id; if (modelData.id !== "off") root.settingsOpen=false } }
+                  MouseArea { id: previewArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.setPreviewScenario(modelData.id); if (modelData.id !== "off") root.settingsOpen=false } }
                 }
               }
             }

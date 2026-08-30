@@ -16,10 +16,32 @@ BarWidget {
     var target = panelLoader.item
     if (!target) return
     target.bar = root.bar
-    target.settings = root.settings
+    target.settings = Qt.binding(function() { return root.settings })
     target.anchorItem = button
     target.hostWidget = root
   }
+  function siblingWidgets() {
+    return root.bar && typeof root.bar.moduleWidgets === "function"
+      ? root.bar.moduleWidgets(root.moduleName) : [root]
+  }
+  function publishSettings(entry) {
+    var widgets = siblingWidgets()
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i] && typeof widgets[i].receiveSettings === "function") widgets[i].receiveSettings(entry)
+  }
+  function receiveSettings(entry) { root.settings = entry }
+  function publishData(value) {
+    var widgets = siblingWidgets()
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i] && typeof widgets[i].receiveData === "function") widgets[i].receiveData(value)
+  }
+  function receiveData(value) { if (panelLoader.item) panelLoader.item.data = value }
+  function publishPreview(scenario) {
+    var widgets = siblingWidgets()
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i] && typeof widgets[i].receivePreview === "function") widgets[i].receivePreview(scenario)
+  }
+  function receivePreview(scenario) { if (panelLoader.item) panelLoader.item.previewScenario = scenario }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
