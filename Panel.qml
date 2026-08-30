@@ -26,6 +26,7 @@ Panel {
   readonly property int selectedRosterId: parseInt(setting("rosterId", 0), 10) || 0
   readonly property string shortName: String(setting("shortName", ""))
   readonly property string colorMode: String(setting("colorMode", "theme"))
+  readonly property string playerDisplayMode: String(setting("playerDisplayMode", "full"))
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 2), 10) || 2) // retained for settings compatibility
   readonly property string syncState: data && data.sync_state ? String(data.sync_state) : "idle"
   readonly property int adaptiveIntervalMs: data && Number(data.next_refresh_seconds) > 0 ? Number(data.next_refresh_seconds) * 1000 : 900000
@@ -126,16 +127,18 @@ Panel {
   }
   function open() { if (leagueId === "") settingsOpen = true; controller.show(); refresh(false) }
   function close() { settingsOpen = false; controller.hide() }
-  function saveEntry(leagueId, rosterId, label, mode) {
+  function saveEntry(leagueId, rosterId, label, mode, displayMode) {
     var entry = {id:root.moduleName, leagueId:leagueId, rosterId:rosterId,
                  shortName:label || "", refreshMinutes:root.refreshMinutes,
-                 colorMode:mode || root.colorMode}
+                 colorMode:mode || root.colorMode,
+                 playerDisplayMode:displayMode || root.playerDisplayMode}
     root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
-  function persist(rosterId, label) { saveEntry(root.leagueId, rosterId, label, root.colorMode) }
-  function setColorMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), mode) }
+  function persist(rosterId, label) { saveEntry(root.leagueId, rosterId, label, root.colorMode, root.playerDisplayMode) }
+  function setColorMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), mode, root.playerDisplayMode) }
+  function setPlayerDisplayMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), root.colorMode, mode) }
   function leagueIdFromInput(value) {
     var text = String(value || "").trim()
     var match = text.match(/(?:leagues\/)?(\d{10,})/)
@@ -149,7 +152,7 @@ Panel {
     }
     settingsMessage = "Syncing league…"
     data = null
-    saveEntry(id, 0, labelField.text.trim(), root.colorMode)
+    saveEntry(id, 0, labelField.text.trim(), root.colorMode, root.playerDisplayMode)
     Qt.callLater(function() { refresh(true) })
   }
   function openSleeper() {
@@ -280,6 +283,27 @@ Panel {
               }
             }
             Text { text: root.colorMode === "theme" ? "Uses the active Omarchy accent and muted colours." : (root.colorMode === "performance" ? "Adds green for leading and urgent colour for trailing." : "Keeps the scoreboard monochrome."); color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+            Text { text: "Score detail"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+            Flow {
+              width: parent.width; spacing: Style.space(8)
+              Repeater {
+                model: [{id:"full",label:"Full"},{id:"scores",label:"Scores only"},{id:"progress",label:"Game progress"},{id:"pace",label:"Pace only"}]
+                Rectangle {
+                  required property var modelData
+                  width: detailLabel.implicitWidth + Style.space(24); height: Style.space(32); radius: Style.cornerRadius
+                  color: modelData.id === root.playerDisplayMode ? Style.selectedFillFor(root.bar.foreground, Color.accent) : (detailArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent")
+                  border.width: 1
+                  border.color: modelData.id === root.playerDisplayMode ? Color.accent : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.18)
+                  Text { id: detailLabel; anchors.centerIn: parent; text: modelData.label; color: modelData.id === root.playerDisplayMode ? Style.selectedStateColor(root.bar.foreground,Color.accent) : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  MouseArea { id: detailArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.setPlayerDisplayMode(modelData.id) }
+                }
+              }
+            }
+            Text {
+              width: parent.width; wrapMode: Text.WordWrap
+              text: root.playerDisplayMode === "scores" ? "Plain names and scores, with progress rails, pace colours, and symbols hidden." : (root.playerDisplayMode === "progress" ? "Shows neutral live clocks and game-progress rails without pace styling." : (root.playerDisplayMode === "pace" ? "Shows pace colours and symbols without live clocks or progress rails." : "Shows live game progress and pace indicators together."))
+              color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+            }
             Text { text: "Live-game preview"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
             Row {
               spacing: Style.space(8)
@@ -323,8 +347,8 @@ Panel {
           Row {
             visible: !root.settingsOpen && root.myGame && root.opponentGame
             width: parent.width; spacing: Style.space(24)
-            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; opponentScore: root.opponentGame ? root.opponentGame.points : 0; game: root.myGame; bar: root.bar; colorMode: root.colorMode }
-            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode }
+            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; opponentScore: root.opponentGame ? root.opponentGame.points : 0; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
+            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
           }
         }
       }
