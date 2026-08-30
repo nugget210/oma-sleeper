@@ -34,8 +34,10 @@ Panel {
   readonly property var opponentGame: opponentFor(myGame)
   readonly property string opponentName: opponentGame ? teamName(opponentGame.roster_id) : "OPP"
   readonly property string opponentShort: abbreviation(opponentName)
+  readonly property string matchupState: calculateMatchupState(myGame, opponentGame)
+  readonly property string barStatusSuffix: matchupState === "live" ? " · ● LIVE" : (matchupState === "upcoming" ? " · UPCOMING" : (matchupState === "final" ? " · FINAL" : ""))
   readonly property string barText: leagueId === "" ? "NFL SETUP" : (loading && !data ? "NFL …" :
-    (myGame && opponentGame ? (shortName || "MY") + " " + score(myGame.points) + " – " + score(opponentGame.points) + " " + opponentShort : "NFL SETUP"))
+    (myGame && opponentGame ? (shortName || "MY") + " " + score(myGame.points) + " – " + score(opponentGame.points) + " " + opponentShort + barStatusSuffix : "NFL SETUP"))
   readonly property bool hasLiveScore: myGame && opponentGame && (Number(myGame.points) > 0 || Number(opponentGame.points) > 0)
   readonly property color positiveColor: colorMode === "performance" ? "#86b875" : Color.accent
   readonly property color negativeColor: colorMode === "performance" ? Color.urgent : Color.muted
@@ -44,6 +46,21 @@ Panel {
      (Number(myGame.points) < Number(opponentGame.points) ? negativeColor : (bar ? bar.foreground : Color.foreground)))
 
   function score(value) { return Number(value || 0).toFixed(1) }
+  function calculateMatchupState(first, second) {
+    if (!first || !second) return "idle"
+    var players = (first.starters || []).concat(second.starters || [])
+    var live = 0, upcoming = 0, completed = 0
+    for (var i = 0; i < players.length; i++) {
+      var state = players[i].game_status ? players[i].game_status.state : "idle"
+      if (state === "in") live++
+      else if (state === "pre") upcoming++
+      else if (state === "post") completed++
+    }
+    if (live > 0) return "live"
+    if (upcoming > 0) return "upcoming"
+    if (completed > 0) return "final"
+    return "idle"
+  }
   function buildPreviewData(source, scenario) {
     if (!source || !source.games) return source
     var copy = JSON.parse(JSON.stringify(source))

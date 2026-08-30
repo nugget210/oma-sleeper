@@ -50,6 +50,8 @@ Preview scores are local and temporary. They are never sent to Sleeper, do not r
 
 During games, each active player shows the NFL quarter, clock, and a progress rail. With at least two prior league weeks available, the current score is compared with that player's rolling fantasy average at the same game progress: green/`▲` is above pace, orange/`●` is near pace, and urgent red/`▼` is below pace. Pregame and insufficient-history states remain neutral.
 
+The compact bar derives matchup state from the NFL games attached to both starting lineups. It shows `UPCOMING` while starter games are scheduled, `● LIVE` when any starter is playing, and `FINAL` after the relevant slate has completed. If schedule data is unavailable, no status suffix is shown rather than guessing.
+
 Player metadata is cached once per day in `~/.cache/oma-sleeper` because Sleeper recommends fetching the full NFL player map sparingly. League, user, and roster metadata is cached for one hour. Matchup scores use adaptive refresh intervals:
 
 - 60 seconds while an NFL game is live

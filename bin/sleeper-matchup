@@ -48,8 +48,8 @@ fi
 
 # Sleeper owns all fantasy data. ESPN's scoreboard is used only as a small,
 # unauthenticated game-clock signal so the client can poll intelligently.
-date_from="$(date -u -d yesterday +%Y%m%d)"
-date_to="$(date -u -d tomorrow +%Y%m%d)"
+date_from="$(date -u -d '4 days ago' +%Y%m%d)"
+date_to="$(date -u -d '4 days' +%Y%m%d)"
 scoreboard="$(curl "${curl_args[@]}" "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=$date_from-$date_to" 2>/dev/null || printf '{"events":[]}')"
 now_ms="$(( $(date +%s) * 1000 ))"
 sync_state="$(jq -r --argjson now "$now_ms" -f "$plugin_dir/lib/sync-state.jq" <<<"$scoreboard" 2>/dev/null || printf idle)"
