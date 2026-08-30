@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "oma-sleeper",
   "name": "Sleeper Matchup",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "author": "Omarchy community",
   "description": "Live Sleeper fantasy matchup score and lineup panel",
   "kinds": ["bar-widget"],

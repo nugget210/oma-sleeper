@@ -50,9 +50,13 @@ fi
 # unauthenticated game-clock signal so the client can poll intelligently.
 date_from="$(date -u -d '4 days ago' +%Y%m%d)"
 date_to="$(date -u -d '4 days' +%Y%m%d)"
-scoreboard="$(curl "${curl_args[@]}" "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=$date_from-$date_to" 2>/dev/null || printf '{"events":[]}')"
+scoreboard_file="$cache_dir/scoreboard.json"
+if ! curl "${curl_args[@]}" "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=$date_from-$date_to" -o "$scoreboard_file.tmp" 2>/dev/null; then
+  printf '{"events":[]}' > "$scoreboard_file.tmp"
+fi
+mv "$scoreboard_file.tmp" "$scoreboard_file"
 now_ms="$(( $(date +%s) * 1000 ))"
-sync_state="$(jq -r --argjson now "$now_ms" -f "$plugin_dir/lib/sync-state.jq" <<<"$scoreboard" 2>/dev/null || printf idle)"
+sync_state="$(jq -r --argjson now "$now_ms" -f "$plugin_dir/lib/sync-state.jq" "$scoreboard_file" 2>/dev/null || printf idle)"
 
 players_file="$cache_dir/players.json"
 if [[ ! -s "$players_file" ]] || [[ -n "$(find "$players_file" -mtime +0 -print -quit 2>/dev/null)" ]]; then
@@ -64,7 +68,7 @@ fi
 jq -n \
   --argjson league "$league" --argjson users "$users" \
   --argjson rosters "$rosters" --argjson matchups "$matchups" \
-  --argjson history "$history" --argjson scoreboard "$scoreboard" \
+  --argjson history "$history" --slurpfile scoreboard "$scoreboard_file" \
   --slurpfile players "$players_file" --argjson week "$week" \
   --arg sync_state "$sync_state" '
   def teamname($rid):
@@ -74,7 +78,7 @@ jq -n \
   def baseline($id): [$history[][]? | .players_points[$id] // empty] as $v |
     {expected:(if ($v|length)>0 then ($v|add/length) else null end), samples:($v|length)};
   def game_status($team):
-    ([ $scoreboard.events[]?.competitions[]? as $c |
+    ([ $scoreboard[0].events[]?.competitions[]? as $c |
        $c.competitors[]? | select((.team.abbreviation // "") == $team or
          ($team == "WAS" and .team.abbreviation == "WSH")) |
        {state:$c.status.type.state, period:($c.status.period // 0), clock:($c.status.displayClock // ""),
