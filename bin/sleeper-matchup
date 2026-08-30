@@ -36,6 +36,16 @@ users="$(cache_fetch "users-$league_id" 3600 "$api/league/$league_id/users")"
 rosters="$(cache_fetch "rosters-$league_id" 3600 "$api/league/$league_id/rosters")"
 matchups="$(curl "${curl_args[@]}" "$api/league/$league_id/matchups/$week")"
 
+history='[]'
+if (( week > 1 )); then
+  history_files=()
+  for (( previous_week=1; previous_week<week; previous_week++ )); do
+    cache_fetch "history-$league_id-$previous_week" 31536000 "$api/league/$league_id/matchups/$previous_week" >/dev/null
+    history_files+=("$cache_dir/history-$league_id-$previous_week.json")
+  done
+  history="$(jq -s '.' "${history_files[@]}")"
+fi
+
 # Sleeper owns all fantasy data. ESPN's scoreboard is used only as a small,
 # unauthenticated game-clock signal so the client can poll intelligently.
 date_from="$(date -u -d yesterday +%Y%m%d)"
@@ -54,19 +64,33 @@ fi
 jq -n \
   --argjson league "$league" --argjson users "$users" \
   --argjson rosters "$rosters" --argjson matchups "$matchups" \
+  --argjson history "$history" --argjson scoreboard "$scoreboard" \
   --slurpfile players "$players_file" --argjson week "$week" \
   --arg sync_state "$sync_state" '
   def teamname($rid):
     ($rosters[] | select(.roster_id == $rid) | .owner_id) as $owner |
     (($users[] | select(.user_id == $owner) | .metadata.team_name) //
      ($users[] | select(.user_id == $owner) | .display_name) // ("Roster " + ($rid|tostring)));
+  def baseline($id): [$history[][]? | .players_points[$id] // empty] as $v |
+    {expected:(if ($v|length)>0 then ($v|add/length) else null end), samples:($v|length)};
+  def game_status($team):
+    ([ $scoreboard.events[]?.competitions[]? as $c |
+       $c.competitors[]? | select((.team.abbreviation // "") == $team or
+         ($team == "WAS" and .team.abbreviation == "WSH")) |
+       {state:$c.status.type.state, period:($c.status.period // 0), clock:($c.status.displayClock // ""),
+        progress:(if $c.status.type.state == "post" then 1
+          elif $c.status.type.state == "in" then
+            ([0, (((($c.status.period // 1)-1)*900 + (900-($c.status.clock // 900)))/3600), 1] | sort | .[1])
+          else 0 end)} ][0] // {state:"idle",period:0,clock:"",progress:0});
   def player($id; $pts; $slot):
     ($players[0][$id] // {}) as $p |
+    baseline($id) as $base |
     {id:$id, slot:$slot,
      name:(if $id == "0" then "Empty" elif ($id|test("^[A-Z]+$")) then ($id + " Defense")
            else (([$p.first_name,$p.last_name] | map(select(. != null and . != "")) | join(" ")) // $id) end),
      position:($p.position // (if ($id|test("^[A-Z]+$")) then "DEF" else "" end)),
-     nfl_team:($p.team // ""), points:($pts[$id] // 0)};
+     nfl_team:($p.team // ""), points:($pts[$id] // 0), expected:$base.expected,
+     expected_samples:$base.samples, game_status:game_status($p.team // $id)};
   [$league.roster_positions[] | select(. != "BN")] as $slots |
   [$rosters[] | {roster_id, name:teamname(.roster_id)}] as $teams |
   [$matchups[] | . as $m |

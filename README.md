@@ -48,6 +48,8 @@ The settings pane includes **Leading**, **Trailing**, and **Off** preview contro
 
 Preview scores are local and temporary. They are never sent to Sleeper, do not replace fetched matchup data, and reset when the shell restarts.
 
+During games, each active player shows the NFL quarter, clock, and a progress rail. With at least two prior league weeks available, the current score is compared with that player's rolling fantasy average at the same game progress: green/`▲` is above pace, orange/`●` is near pace, and urgent red/`▼` is below pace. Pregame and insufficient-history states remain neutral.
+
 Player metadata is cached once per day in `~/.cache/oma-sleeper` because Sleeper recommends fetching the full NFL player map sparingly. League, user, and roster metadata is cached for one hour. Matchup scores use adaptive refresh intervals:
 
 - 60 seconds while an NFL game is live

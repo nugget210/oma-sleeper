@@ -70,9 +70,12 @@ Panel {
     for (var i = 0; i < game.starters.length; i++) {
       var value = i < points.length ? points[i] : 0
       game.starters[i].points = value
+      game.starters[i].expected_samples = 4
+      game.starters[i].expected = value === 0 ? 8 : (value / 0.58) * ([0.72,1.0,1.35][i % 3])
+      game.starters[i].game_status = {state:"in", period:3, clock:"6:18", progress:0.58}
       total += value
     }
-    for (var j = 0; j < game.bench.length; j++) game.bench[j].points = j < 2 ? [5.6,2.3][j] : 0
+    for (var j = 0; j < game.bench.length; j++) { game.bench[j].points = j < 2 ? [5.6,2.3][j] : 0; game.bench[j].game_status={state:"in",period:3,clock:"6:18",progress:0.58} }
     game.points = Math.round(total * 10) / 10
   }
   function gameFor(id) {
