@@ -33,6 +33,11 @@ Panel {
   readonly property var viewData: previewScenario === "off" ? data : buildPreviewData(data, previewScenario)
   readonly property var myGame: gameFor(selectedRosterId)
   readonly property var opponentGame: opponentFor(myGame)
+  readonly property real widestPlayerLabel: widestLineupLabel(myGame, opponentGame)
+  readonly property bool reservesProgressSpace: playerDisplayMode === "full" || playerDisplayMode === "progress"
+  readonly property real desiredPanelWidth: Math.max(Style.space(620),
+    Style.space(16) + 2 * (Style.space(34 + 4 + 4 + 42 + 8) + widestPlayerLabel
+      + (reservesProgressSpace ? Style.space(52) : 0)))
   readonly property string opponentName: opponentGame ? teamName(opponentGame.roster_id) : "OPP"
   readonly property string opponentShort: abbreviation(opponentName)
   readonly property string matchupState: calculateMatchupState(myGame, opponentGame)
@@ -47,6 +52,27 @@ Panel {
      (Number(myGame.points) < Number(opponentGame.points) ? negativeColor : (bar ? bar.foreground : Color.foreground)))
 
   function score(value) { return Number(value || 0).toFixed(1) }
+  function widestLineupLabel(first, second) {
+    var widest = 0
+    var games = [first, second]
+    for (var g = 0; g < games.length; g++) {
+      if (!games[g]) continue
+      var players = (games[g].starters || []).concat(games[g].bench || [])
+      for (var i = 0; i < players.length; i++) {
+        var label = String(players[i].name || "")
+          + (players[i].nfl_team ? " · " + players[i].nfl_team : "")
+        widest = Math.max(widest, playerFontMetrics.advanceWidth(label))
+      }
+    }
+    return widest
+  }
+
+  FontMetrics {
+    id: playerFontMetrics
+    font.family: root.bar ? root.bar.fontFamily : ""
+    font.pixelSize: Style.font.body
+  }
+
   function calculateMatchupState(first, second) {
     if (!first || !second) return "idle"
     var players = (first.starters || []).concat(second.starters || [])
@@ -197,7 +223,7 @@ Panel {
     open: root.opened
     centerOnBar: true
     focusTarget: keyCatcher
-    contentWidth: fittedContentWidth(Style.space(620))
+    contentWidth: fittedContentWidth(root.desiredPanelWidth)
     // Request the complete two-roster layout. KeyboardPanel still clamps the
     // card to the physical output when a genuinely smaller display requires
     // it, but normal desktop screens no longer hide the last bench players.
@@ -346,7 +372,7 @@ Panel {
 
           Row {
             visible: !root.settingsOpen && root.myGame && root.opponentGame
-            width: parent.width; spacing: Style.space(24)
+            width: parent.width; spacing: Style.space(16)
             TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; opponentScore: root.opponentGame ? root.opponentGame.points : 0; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
             TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
           }

@@ -20,8 +20,28 @@ Item {
   Rectangle { id: slotBadge; width: Style.space(34); height: Style.space(20); anchors.verticalCenter: parent.verticalCenter; radius: Style.cornerRadius; color: root.colorMode === "minimal" ? "transparent" : Qt.rgba(Color.accent.r,Color.accent.g,Color.accent.b,.09)
     Text { anchors.centerIn: parent; text: root.player.slot; color: Qt.darker(root.bar.foreground,1.45); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption }
   }
-  Text { anchors.left: slotBadge.right; anchors.leftMargin: Style.space(4); anchors.right: gameProgress.left; anchors.rightMargin: Style.space(6); anchors.verticalCenter: parent.verticalCenter; text: root.player.name + (root.player.nfl_team ? " · " + root.player.nfl_team : ""); elide: Text.ElideRight; color: root.player.slot === "BN" ? Color.muted : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
-  Item { id: gameProgress; width: root.live && root.showProgress ? Style.space(58) : 0; height: parent.height; anchors.right: pts.left; anchors.rightMargin: root.live && root.showProgress ? Style.space(7) : 0
+  Item {
+    id: playerLabel
+    anchors.left: slotBadge.right; anchors.leftMargin: Style.space(4)
+    anchors.right: gameProgress.left; anchors.rightMargin: Style.space(4)
+    height: parent.height; clip: true
+    Text {
+      id: playerName
+      anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+      text: root.player.name
+      color: root.player.slot === "BN" ? Color.muted : root.bar.foreground
+      font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+    }
+    Text {
+      visible: Boolean(root.player.nfl_team)
+      anchors.left: playerName.right; anchors.leftMargin: Style.space(4)
+      anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+      text: "· " + root.player.nfl_team; elide: Text.ElideRight
+      color: root.player.slot === "BN" ? Color.muted : root.bar.foreground
+      font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+    }
+  }
+  Item { id: gameProgress; visible: root.live && root.showProgress; width: visible ? Style.space(48) : 0; height: parent.height; anchors.right: pts.left; anchors.rightMargin: visible ? Style.space(4) : 0
     Text { anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter; text: "Q"+root.gameStatus.period+" "+root.gameStatus.clock; color: Color.muted; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption }
     Rectangle { anchors.bottom: parent.bottom; anchors.bottomMargin: Style.space(3); width: parent.width; height: Style.space(3); radius: height/2; color: Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.10)
       Rectangle { width: parent.width*Math.max(0,Math.min(1,Number(root.gameStatus.progress||0))); height: parent.height; radius: height/2; color: root.evaluable ? root.paceColor : Color.accent }
