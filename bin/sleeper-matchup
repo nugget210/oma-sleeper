@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+league_id="${1:?league id required}"
+week="${2:-auto}"
+metadata_mode="${3:-normal}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+plugin_dir="$(dirname -- "$script_dir")"
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/oma-sleeper"
+mkdir -p "$cache_dir"
+
+api="https://api.sleeper.app/v1"
+curl_args=(-fsS --max-time 12)
+
+cache_fetch() {
+  local name="$1" max_age="$2" url="$3"
+  local file="$cache_dir/$name.json" now modified age tmp
+  now="$(date +%s)"
+  modified="$(stat -c %Y "$file" 2>/dev/null || echo 0)"
+  age=$((now - modified))
+  if [[ "$metadata_mode" == force ]] || [[ ! -s "$file" ]] || (( age >= max_age )); then
+    tmp="$file.tmp"
+    curl "${curl_args[@]}" "$url" -o "$tmp"
+    mv "$tmp" "$file"
+  fi
+  cat "$file"
+}
+
+if [[ "$week" == auto ]]; then
+  nfl_state="$(cache_fetch nfl-state 300 "$api/state/nfl")"
+  week="$(jq -r '.display_week // .week // 1' <<<"$nfl_state")"
+fi
+
+league="$(cache_fetch "league-$league_id" 3600 "$api/league/$league_id")"
+users="$(cache_fetch "users-$league_id" 3600 "$api/league/$league_id/users")"
+rosters="$(cache_fetch "rosters-$league_id" 3600 "$api/league/$league_id/rosters")"
+matchups="$(curl "${curl_args[@]}" "$api/league/$league_id/matchups/$week")"
+
+# Sleeper owns all fantasy data. ESPN's scoreboard is used only as a small,
+# unauthenticated game-clock signal so the client can poll intelligently.
+date_from="$(date -u -d yesterday +%Y%m%d)"
+date_to="$(date -u -d tomorrow +%Y%m%d)"
+scoreboard="$(curl "${curl_args[@]}" "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=$date_from-$date_to" 2>/dev/null || printf '{"events":[]}')"
+now_ms="$(( $(date +%s) * 1000 ))"
+sync_state="$(jq -r --argjson now "$now_ms" -f "$plugin_dir/lib/sync-state.jq" <<<"$scoreboard" 2>/dev/null || printf idle)"
+
+players_file="$cache_dir/players.json"
+if [[ ! -s "$players_file" ]] || [[ -n "$(find "$players_file" -mtime +0 -print -quit 2>/dev/null)" ]]; then
+  tmp="$players_file.tmp"
+  curl "${curl_args[@]}" "$api/players/nfl" -o "$tmp"
+  mv "$tmp" "$players_file"
+fi
+
+jq -n \
+  --argjson league "$league" --argjson users "$users" \
+  --argjson rosters "$rosters" --argjson matchups "$matchups" \
+  --slurpfile players "$players_file" --argjson week "$week" \
+  --arg sync_state "$sync_state" '
+  def teamname($rid):
+    ($rosters[] | select(.roster_id == $rid) | .owner_id) as $owner |
+    (($users[] | select(.user_id == $owner) | .metadata.team_name) //
+     ($users[] | select(.user_id == $owner) | .display_name) // ("Roster " + ($rid|tostring)));
+  def player($id; $pts; $slot):
+    ($players[0][$id] // {}) as $p |
+    {id:$id, slot:$slot,
+     name:(if $id == "0" then "Empty" elif ($id|test("^[A-Z]+$")) then ($id + " Defense")
+           else (([$p.first_name,$p.last_name] | map(select(. != null and . != "")) | join(" ")) // $id) end),
+     position:($p.position // (if ($id|test("^[A-Z]+$")) then "DEF" else "" end)),
+     nfl_team:($p.team // ""), points:($pts[$id] // 0)};
+  [$league.roster_positions[] | select(. != "BN")] as $slots |
+  [$rosters[] | {roster_id, name:teamname(.roster_id)}] as $teams |
+  [$matchups[] | . as $m |
+    {roster_id, matchup_id, points:(.custom_points // .points // 0),
+     starters:[range(0; (.starters|length)) as $i | player(.starters[$i]; (.players_points // {}); ($slots[$i] // "START"))],
+     bench:[(.players - .starters)[]? as $id | player($id; (.players_points // {}); "BN")]}] as $games |
+  {league_id:$league.league_id, league_name:$league.name, season:$league.season, week:$week,
+   teams:$teams, games:$games, sync_state:$sync_state,
+   next_refresh_seconds:(if $sync_state == "live" then 60 elif $sync_state == "pregame" then 300 else 900 end)}'
