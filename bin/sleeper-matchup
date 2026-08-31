@@ -36,6 +36,20 @@ users="$(cache_fetch "users-$league_id" 3600 "$api/league/$league_id/users")"
 rosters="$(cache_fetch "rosters-$league_id" 3600 "$api/league/$league_id/rosters")"
 matchups="$(curl "${curl_args[@]}" "$api/league/$league_id/matchups/$week")"
 
+# Refresh weekly projections whenever matchup scores refresh. The panel polls
+# every minute during live games, so changing projected totals follow the same
+# cadence. Keep the last good response if Sleeper is temporarily unavailable.
+season="$(jq -r '.season' <<<"$league")"
+projections_file="$cache_dir/projections-$season-$week.json"
+projections_tmp="$projections_file.tmp"
+if curl "${curl_args[@]}" "$api/projections/nfl/regular/$season/$week" -o "$projections_tmp" 2>/dev/null \
+    && jq -e 'type == "object"' "$projections_tmp" >/dev/null 2>&1; then
+  mv "$projections_tmp" "$projections_file"
+else
+  rm -f "$projections_tmp"
+fi
+[[ -s "$projections_file" ]] || printf '[]' > "$projections_file"
+
 history='[]'
 if (( week > 1 )); then
   history_files=()
@@ -69,7 +83,8 @@ jq -n \
   --argjson league "$league" --argjson users "$users" \
   --argjson rosters "$rosters" --argjson matchups "$matchups" \
   --argjson history "$history" --slurpfile scoreboard "$scoreboard_file" \
-  --slurpfile players "$players_file" --argjson week "$week" \
+  --slurpfile players "$players_file" --slurpfile projections "$projections_file" \
+  --argjson week "$week" \
   --arg sync_state "$sync_state" '
   def teamname($rid):
     ($rosters[] | select(.roster_id == $rid) | .owner_id) as $owner |
@@ -77,8 +92,18 @@ jq -n \
      ($users[] | select(.user_id == $owner) | .display_name) // ("Roster " + ($rid|tostring)));
   def baseline($id): [$history[][]? | .players_points[$id] // empty] as $v |
     {expected:(if ($v|length)>0 then ($v|add/length) else null end), samples:($v|length)};
+  def projection($id):
+    ($projections[0] // {}) as $all_projections |
+    (if ($all_projections | type) == "object" then $all_projections[$id] else null end) as $stats |
+    if $stats == null then null
+    else reduce ($league.scoring_settings | to_entries[]) as $rule
+      (0; . + (($stats[$rule.key] // 0) * ($rule.value // 0)))
+    end;
   def game_status($team):
-    ([ $scoreboard[0].events[]?.competitions[]? as $c |
+    ([ $scoreboard[0].events[]? as $event |
+       select(($event.season.type // 0) == 2 and
+         (($event.season.year // 0) | tostring) == ($league.season | tostring)) |
+       $event.competitions[]? as $c |
        $c.competitors[]? | select((.team.abbreviation // "") == $team or
          ($team == "WAS" and .team.abbreviation == "WSH")) |
        {state:$c.status.type.state, period:($c.status.period // 0), clock:($c.status.displayClock // ""),
@@ -93,7 +118,7 @@ jq -n \
      name:(if $id == "0" then "Empty" elif ($id|test("^[A-Z]+$")) then ($id + " Defense")
            else (([$p.first_name,$p.last_name] | map(select(. != null and . != "")) | join(" ")) // $id) end),
      position:($p.position // (if ($id|test("^[A-Z]+$")) then "DEF" else "" end)),
-     nfl_team:($p.team // ""), points:($pts[$id] // 0), expected:$base.expected,
+     nfl_team:($p.team // ""), points:($pts[$id] // 0), projected:projection($id), expected:$base.expected,
      expected_samples:$base.samples, game_status:game_status($p.team // $id)};
   [$league.roster_positions[] | select(. != "BN")] as $slots |
   [$rosters[] | {roster_id, name:teamname(.roster_id)}] as $teams |

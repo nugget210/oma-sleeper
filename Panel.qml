@@ -25,6 +25,7 @@ Panel {
   readonly property string leagueId: String(setting("leagueId", ""))
   readonly property int selectedRosterId: parseInt(setting("rosterId", 0), 10) || 0
   readonly property string shortName: String(setting("shortName", ""))
+  readonly property string opponentLabel: String(setting("opponentName", ""))
   readonly property string colorMode: String(setting("colorMode", "theme"))
   readonly property string playerDisplayMode: String(setting("playerDisplayMode", "full"))
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 2), 10) || 2) // retained for settings compatibility
@@ -38,10 +39,10 @@ Panel {
   readonly property real desiredPanelWidth: Math.max(Style.space(620),
     Style.space(16) + 2 * (Style.space(34 + 4 + 4 + 42 + 8) + widestPlayerLabel
       + (reservesProgressSpace ? Style.space(52) : 0)))
-  readonly property string opponentName: opponentGame ? teamName(opponentGame.roster_id) : "OPP"
-  readonly property string opponentShort: abbreviation(opponentName)
+  readonly property string opponentName: opponentLabel || (opponentGame ? teamName(opponentGame.roster_id) : "OPP")
+  readonly property string opponentShort: opponentLabel || abbreviation(opponentName)
   readonly property string matchupState: calculateMatchupState(myGame, opponentGame)
-  readonly property string barStatusSuffix: matchupState === "live" ? " · ● LIVE" : (matchupState === "upcoming" ? " · UPCOMING" : (matchupState === "final" ? " · FINAL" : ""))
+  readonly property string barStatusSuffix: matchupState === "live" ? " · ● LIVE" : (matchupState === "upcoming" ? " · UPCOMING" : "")
   readonly property string barText: leagueId === "" ? "NFL SETUP" : (loading && !data ? "NFL …" :
     (myGame && opponentGame ? (shortName || "MY") + " " + score(myGame.points) + " – " + score(opponentGame.points) + " " + opponentShort + barStatusSuffix : "NFL SETUP"))
   readonly property bool hasLiveScore: myGame && opponentGame && (Number(myGame.points) > 0 || Number(opponentGame.points) > 0)
@@ -52,6 +53,31 @@ Panel {
      (Number(myGame.points) < Number(opponentGame.points) ? negativeColor : (bar ? bar.foreground : Color.foreground)))
 
   function score(value) { return Number(value || 0).toFixed(1) }
+  function projectedScore(game) {
+    if (!game || !game.starters) return null
+    var total = 0
+    var projectedPlayers = 0
+    var roundStarted = false
+    for (var s = 0; s < game.starters.length; s++) {
+      var starterStatus = game.starters[s].game_status || {}
+      if (starterStatus.state === "in" || Number(game.starters[s].points || 0) !== 0) {
+        roundStarted = true
+        break
+      }
+    }
+    for (var i = 0; i < game.starters.length; i++) {
+      var player = game.starters[i]
+      var projection = player.projected
+      if (projection === null || projection === undefined || !isFinite(Number(projection))) continue
+      projectedPlayers++
+      var status = player.game_status || {}
+      var progress = Math.max(0, Math.min(1, Number(status.progress || 0)))
+      if (status.state === "post" && roundStarted) total += Number(player.points || 0)
+      else if (status.state === "in") total += Number(player.points || 0) + Number(projection) * (1 - progress)
+      else total += Number(projection)
+    }
+    return projectedPlayers > 0 ? total : null
+  }
   function widestLineupLabel(first, second) {
     var widest = 0
     var games = [first, second]
@@ -153,20 +179,21 @@ Panel {
   }
   function open() { if (leagueId === "") settingsOpen = true; controller.show(); refresh(false) }
   function close() { settingsOpen = false; controller.hide() }
-  function saveEntry(leagueId, rosterId, label, mode, displayMode) {
+  function saveEntry(leagueId, rosterId, label, mode, displayMode, opponentName) {
     var entry = {id:root.moduleName, leagueId:leagueId, rosterId:rosterId,
                  shortName:label || "", refreshMinutes:root.refreshMinutes,
                  colorMode:mode || root.colorMode,
-                 playerDisplayMode:displayMode || root.playerDisplayMode}
+                 playerDisplayMode:displayMode || root.playerDisplayMode,
+                 opponentName:opponentName || ""}
     if (root.hostWidget && typeof root.hostWidget.publishSettings === "function")
       root.hostWidget.publishSettings(entry)
     else root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
-  function persist(rosterId, label) { saveEntry(root.leagueId, rosterId, label, root.colorMode, root.playerDisplayMode) }
-  function setColorMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), mode, root.playerDisplayMode) }
-  function setPlayerDisplayMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), root.colorMode, mode) }
+  function persist(rosterId, label) { saveEntry(root.leagueId, rosterId, label, root.colorMode, root.playerDisplayMode, opponentField.text.trim()) }
+  function setColorMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), mode, root.playerDisplayMode, opponentField.text.trim()) }
+  function setPlayerDisplayMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), root.colorMode, mode, opponentField.text.trim()) }
   function setPreviewScenario(scenario) {
     if (root.hostWidget && typeof root.hostWidget.publishPreview === "function")
       root.hostWidget.publishPreview(scenario)
@@ -185,7 +212,7 @@ Panel {
     }
     settingsMessage = "Syncing league…"
     data = null
-    saveEntry(id, 0, labelField.text.trim(), root.colorMode, root.playerDisplayMode)
+    saveEntry(id, 0, labelField.text.trim(), root.colorMode, root.playerDisplayMode, opponentField.text.trim())
     Qt.callLater(function() { refresh(true) })
   }
   function openSleeper() {
@@ -302,8 +329,10 @@ Panel {
             Text { visible: root.settingsMessage !== ""; text: root.settingsMessage; color: Qt.darker(root.bar.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
             Row {
               spacing: Style.space(12)
-              Text { width: Style.space(110); text: "Bar label"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; anchors.verticalCenter: parent.verticalCenter }
+              Text { width: Style.space(110); text: "Home Team Name"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; anchors.verticalCenter: parent.verticalCenter }
               TextField { id: labelField; width: Style.space(120); text: root.shortName; placeholderText: "MY"; foreground: root.bar.foreground; font.family: root.bar.fontFamily }
+              Text { width: Style.space(110); text: "Opposition Name"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; anchors.verticalCenter: parent.verticalCenter }
+              TextField { id: opponentField; width: Style.space(180); text: root.opponentLabel; placeholderText: "Auto-detect"; foreground: root.bar.foreground; font.family: root.bar.fontFamily }
             }
             Text { text: "Scoreboard colours"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
             Row {
@@ -386,8 +415,8 @@ Panel {
           Row {
             visible: !root.settingsOpen && root.myGame && root.opponentGame
             width: parent.width; spacing: Style.space(16)
-            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; opponentScore: root.opponentGame ? root.opponentGame.points : 0; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
-            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
+            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; projectedScore: root.projectedScore(root.myGame); opponentScore: root.opponentGame ? root.opponentGame.points : 0; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
+            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; projectedScore: root.projectedScore(root.opponentGame); opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
           }
         }
       }
