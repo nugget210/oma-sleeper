@@ -70,7 +70,9 @@ Sleeper remains the source of all fantasy data. The public ESPN NFL scoreboard s
 
 ## Resource safety
 
-All remote responses have endpoint-specific download and collection limits and must pass a JSON schema check before use. League IDs, NFL weeks, seasons, roster IDs, player IDs, names, and score collections are type-checked and bounded. Cached responses are stored as owner-only files through unique temporary files inside an owner-only cache directory, then atomically renamed after size and schema validation. The generated QML payload is capped at 2 MiB and the interface renders at most 64 teams, 32 starters, and 32 bench players per team.
+All remote responses have endpoint-specific download and collection limits and must pass a JSON schema check before use. League IDs, NFL weeks, seasons, roster IDs, player IDs, names, and score collections are type-checked and bounded. The cache directory is opened once and all writes remain anchored to that directory descriptor. Cached inputs are hard-linked into a private per-run directory so validation and later processing use the same inode; validated downloads are atomically renamed from unique temporary files. Cache directories are owner-only.
+
+The generated QML payload is capped at 2 MiB and the interface renders at most 64 teams, 32 starters, and 32 bench players per team. Remote and user-provided strings are rendered explicitly as plain text. Optional home/opponent labels have a 24-character limit at both input and persistence boundaries, with control characters removed before they enter `shell.json`.
 
 ## Colour modes
 

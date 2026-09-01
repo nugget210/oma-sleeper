@@ -23,10 +23,11 @@ Panel {
   readonly property int maxTeams: 64
   readonly property int maxPlayersPerSection: 32
   readonly property int maxPayloadCharacters: 2097152
+  readonly property int maxLabelLength: 24
   readonly property string leagueId: String(setting("leagueId", ""))
   readonly property int selectedRosterId: parseInt(setting("rosterId", 0), 10) || 0
-  readonly property string shortName: String(setting("shortName", ""))
-  readonly property string opponentLabel: String(setting("opponentName", ""))
+  readonly property string shortName: boundedLabel(setting("shortName", ""))
+  readonly property string opponentLabel: boundedLabel(setting("opponentName", ""))
   readonly property string colorMode: String(setting("colorMode", "theme"))
   readonly property string playerDisplayMode: String(setting("playerDisplayMode", "full"))
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 2), 10) || 2) // retained for settings compatibility
@@ -53,6 +54,9 @@ Panel {
      (Number(myGame.points) < Number(opponentGame.points) ? negativeColor : (bar ? bar.foreground : Color.foreground)))
 
   function score(value) { return Number(value || 0).toFixed(1) }
+  function boundedLabel(value) {
+    return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, root.maxLabelLength)
+  }
   function projectedScore(game) {
     if (!game || !game.starters) return null
     var total = 0
@@ -147,10 +151,10 @@ Panel {
   function close() { settingsOpen = false; controller.hide() }
   function saveEntry(leagueId, rosterId, label, mode, displayMode, opponentName) {
     var entry = {id:root.moduleName, leagueId:leagueId, rosterId:rosterId,
-                 shortName:label || "", refreshMinutes:root.refreshMinutes,
+                 shortName:root.boundedLabel(label), refreshMinutes:root.refreshMinutes,
                  colorMode:mode || root.colorMode,
                  playerDisplayMode:displayMode || root.playerDisplayMode,
-                 opponentName:opponentName || ""}
+                 opponentName:root.boundedLabel(opponentName)}
     if (root.hostWidget && typeof root.hostWidget.publishSettings === "function")
       root.hostWidget.publishSettings(entry)
     else root.settings = entry
@@ -286,7 +290,7 @@ Panel {
 
           Item {
             width: parent.width; height: Style.space(32)
-            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: root.data ? root.data.league_name + " · Week " + root.data.week : "Sleeper matchup"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: root.data ? root.data.league_name + " · Week " + root.data.week : "Sleeper matchup"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
             Row {
               anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: Style.space(8)
               Repeater {
@@ -294,7 +298,7 @@ Panel {
                 Rectangle {
                   required property var modelData; required property int index
                   width: Style.space(28); height: width; radius: Style.cornerRadius; color: area.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent"
-                  Text { anchors.centerIn: parent; text: modelData.icon; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+                  Text { anchors.centerIn: parent; text: modelData.icon; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
                   MouseArea { id: area; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { if (index===0) root.settingsOpen=!root.settingsOpen; else if(index===1) root.openSleeper(); else root.refresh(true) } }
                 }
               }
@@ -305,8 +309,8 @@ Panel {
 
           Column {
             visible: root.settingsOpen; width: parent.width; spacing: Style.space(12)
-            Text { text: "SETTINGS"; color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
-            Text { text: "Sleeper league URL or ID"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+            Text { text: "SETTINGS"; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
+            Text { text: "Sleeper league URL or ID"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
             Row {
               width: parent.width; spacing: Style.space(10)
               TextField {
@@ -314,6 +318,7 @@ Panel {
                 width: parent.width - updateLeagueButton.width - parent.spacing
                 text: root.leagueId === "" ? "" : "https://sleeper.com/leagues/" + root.leagueId + "/matchup"
                 placeholderText: "Sleeper league URL or ID"
+                maximumLength: 128
                 foreground: root.bar.foreground
                 font.family: root.bar.fontFamily
               }
@@ -321,19 +326,19 @@ Panel {
                 id: updateLeagueButton
                 width: Style.space(92); height: Style.space(34); radius: Style.cornerRadius
                 color: updateLeagueArea.containsMouse ? Color.accent : Style.hoverFillFor(root.bar.foreground, Color.accent)
-                Text { anchors.centerIn: parent; text: root.loading ? "Syncing…" : "Update"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+                Text { anchors.centerIn: parent; text: root.loading ? "Syncing…" : "Update"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
                 MouseArea { id: updateLeagueArea; anchors.fill: parent; enabled: !root.loading; hoverEnabled: true; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: root.updateLeague() }
               }
             }
-            Text { visible: root.settingsMessage !== ""; text: root.settingsMessage; color: Qt.darker(root.bar.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+            Text { visible: root.settingsMessage !== ""; text: root.settingsMessage; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
             Row {
               spacing: Style.space(12)
-              Text { width: Style.space(110); text: "Home Team Name"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; anchors.verticalCenter: parent.verticalCenter }
-              TextField { id: labelField; width: Style.space(120); text: root.shortName; placeholderText: "MY"; foreground: root.bar.foreground; font.family: root.bar.fontFamily }
-              Text { width: Style.space(110); text: "Opposition Name"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; anchors.verticalCenter: parent.verticalCenter }
-              TextField { id: opponentField; width: Style.space(180); text: root.opponentLabel; placeholderText: "Auto-detect"; foreground: root.bar.foreground; font.family: root.bar.fontFamily }
+              Text { width: Style.space(110); text: "Home Team Name"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; anchors.verticalCenter: parent.verticalCenter }
+              TextField { id: labelField; width: Style.space(120); text: root.shortName; maximumLength: root.maxLabelLength; placeholderText: "MY"; foreground: root.bar.foreground; font.family: root.bar.fontFamily }
+              Text { width: Style.space(110); text: "Opposition Name"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; anchors.verticalCenter: parent.verticalCenter }
+              TextField { id: opponentField; width: Style.space(180); text: root.opponentLabel; maximumLength: root.maxLabelLength; placeholderText: "Auto-detect"; foreground: root.bar.foreground; font.family: root.bar.fontFamily }
             }
-            Text { text: "Scoreboard colours"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+            Text { text: "Scoreboard colours"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
             Row {
               spacing: Style.space(8)
               Repeater {
@@ -344,13 +349,13 @@ Panel {
                   color: modelData.id === root.colorMode ? Style.selectedFillFor(root.bar.foreground, Color.accent) : (modeArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent")
                   border.width: 1
                   border.color: modelData.id === root.colorMode ? Color.accent : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.18)
-                  Text { id: modeLabel; anchors.centerIn: parent; text: modelData.label; color: modelData.id === root.colorMode ? Style.selectedStateColor(root.bar.foreground,Color.accent) : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  Text { id: modeLabel; anchors.centerIn: parent; text: modelData.label; textFormat: Text.PlainText; color: modelData.id === root.colorMode ? Style.selectedStateColor(root.bar.foreground,Color.accent) : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
                   MouseArea { id: modeArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.setColorMode(modelData.id) }
                 }
               }
             }
-            Text { text: root.colorMode === "theme" ? "Uses the active Omarchy accent and muted colours." : (root.colorMode === "performance" ? "Adds green for leading and urgent colour for trailing." : "Keeps the scoreboard monochrome."); color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
-            Text { text: "Score detail"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+            Text { text: root.colorMode === "theme" ? "Uses the active Omarchy accent and muted colours." : (root.colorMode === "performance" ? "Adds green for leading and urgent colour for trailing." : "Keeps the scoreboard monochrome."); textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+            Text { text: "Score detail"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
             Flow {
               width: parent.width; spacing: Style.space(8)
               Repeater {
@@ -361,17 +366,17 @@ Panel {
                   color: modelData.id === root.playerDisplayMode ? Style.selectedFillFor(root.bar.foreground, Color.accent) : (detailArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent")
                   border.width: 1
                   border.color: modelData.id === root.playerDisplayMode ? Color.accent : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.18)
-                  Text { id: detailLabel; anchors.centerIn: parent; text: modelData.label; color: modelData.id === root.playerDisplayMode ? Style.selectedStateColor(root.bar.foreground,Color.accent) : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  Text { id: detailLabel; anchors.centerIn: parent; text: modelData.label; textFormat: Text.PlainText; color: modelData.id === root.playerDisplayMode ? Style.selectedStateColor(root.bar.foreground,Color.accent) : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
                   MouseArea { id: detailArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.setPlayerDisplayMode(modelData.id) }
                 }
               }
             }
             Text {
-              width: parent.width; wrapMode: Text.WordWrap
+              width: parent.width; wrapMode: Text.WordWrap; textFormat: Text.PlainText
               text: root.playerDisplayMode === "scores" ? "Plain names and scores, with progress rails, pace colours, and symbols hidden." : (root.playerDisplayMode === "progress" ? "Shows neutral live clocks and game-progress rails without pace styling." : (root.playerDisplayMode === "pace" ? "Shows pace colours and symbols without live clocks or progress rails." : "Shows live game progress and pace indicators together."))
               color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
             }
-            Text { text: "Fantasy team"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+            Text { text: "Fantasy team"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
             Column {
               width: parent.width
               Repeater {
@@ -380,19 +385,19 @@ Panel {
                   required property var modelData
                   width: parent.width; height: Style.space(34); radius: Style.cornerRadius
                   color: modelData.roster_id === root.selectedRosterId ? Style.hoverFillFor(root.bar.foreground, Color.accent) : (teamArea.containsMouse ? Qt.rgba(1,1,1,.04) : "transparent")
-                  Text { anchors.left: parent.left; anchors.leftMargin: Style.space(10); anchors.verticalCenter: parent.verticalCenter; text: (modelData.roster_id === root.selectedRosterId ? "●  " : "○  ") + modelData.name; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+                  Text { anchors.left: parent.left; anchors.leftMargin: Style.space(10); anchors.verticalCenter: parent.verticalCenter; text: (modelData.roster_id === root.selectedRosterId ? "●  " : "○  ") + modelData.name; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
                   MouseArea { id: teamArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.persist(modelData.roster_id, labelField.text.trim()) }
                 }
               }
             }
             Rectangle {
               width: Style.space(90); height: Style.space(32); radius: Style.cornerRadius; color: saveArea.containsMouse ? Color.accent : Style.hoverFillFor(root.bar.foreground, Color.accent)
-              Text { anchors.centerIn: parent; text: "Save"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+              Text { anchors.centerIn: parent; text: "Save"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
               MouseArea { id: saveArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.persist(root.selectedRosterId,labelField.text.trim()); root.settingsOpen=false } }
             }
           }
 
-          Text { visible: root.errorText !== ""; text: root.errorText; color: "#ef5350"; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+          Text { visible: root.errorText !== ""; text: root.errorText; textFormat: Text.PlainText; color: "#ef5350"; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
 
           Row {
             visible: !root.settingsOpen && root.myGame && root.opponentGame

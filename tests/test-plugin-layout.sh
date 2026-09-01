@@ -11,6 +11,8 @@ required_files=(
   manifest.json
   bin/sleeper-matchup
   lib/sync-state.jq
+  tests/test-qml-safety.sh
+  tests/test-resource-safety.sh
 )
 
 for file in "${required_files[@]}"; do

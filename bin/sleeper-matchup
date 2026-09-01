@@ -40,39 +40,55 @@ mkdir -p -- "$cache_dir"
 chmod 0700 -- "$cache_dir"
 cache_dir="$(cd -P -- "$cache_dir" && pwd)"
 [[ "$(stat -c %u -- "$cache_dir")" == "$(id -u)" ]] || die "cache directory is not owned by the current user"
+exec {cache_fd}< "$cache_dir"
+cache_anchor="/proc/self/fd/$cache_fd"
+[[ "$(stat -Lc %u -- "$cache_anchor")" == "$(id -u)" ]] || die "opened cache directory ownership changed"
+session_dir="$(mktemp -d --tmpdir="$cache_anchor" .oma-sleeper.session.XXXXXXXX)"
+chmod 0700 -- "$session_dir"
 
 api="https://api.sleeper.app/v1"
 curl_args=(-fsS --proto '=https' --connect-timeout 5 --max-time 15)
 temporary_files=()
+snapshot_counter=0
 
 cleanup() {
-  local file
+  local status=$? file
+  trap - EXIT
   for file in "${temporary_files[@]}"; do
-    [[ "$file" == "$cache_dir"/.oma-sleeper.* ]] && rm -f -- "$file"
+    [[ "$file" == "$session_dir"/.oma-sleeper.* ]] && rm -f -- "$file"
   done
+  rmdir -- "$session_dir" 2>/dev/null || true
+  exec {cache_fd}<&-
+  exit "$status"
 }
 trap cleanup EXIT
 
 new_temp_file() {
-  TEMP_FILE="$(mktemp --tmpdir="$cache_dir" .oma-sleeper.XXXXXXXX)"
+  TEMP_FILE="$(mktemp --tmpdir="$session_dir" .oma-sleeper.download.XXXXXXXX)"
   temporary_files+=("$TEMP_FILE")
 }
 
 cache_path() {
   local name="$1"
   [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || die "unsafe cache key"
-  CACHE_FILE="$cache_dir/$name.json"
-  [[ "$(dirname -- "$CACHE_FILE")" == "$cache_dir" ]] || die "cache path escaped cache directory"
+  CACHE_TARGET="$cache_anchor/$name.json"
+  [[ "$CACHE_TARGET" == "$cache_anchor/"* ]] || die "cache path escaped opened cache directory"
 }
 
-assert_safe_target() {
-  local file="$1"
-  [[ ! -L "$file" ]] || die "cache target must not be a symlink"
-  [[ ! -e "$file" || -f "$file" ]] || die "cache target must be a regular file"
-  if [[ -e "$file" ]]; then
-    [[ "$(stat -c %u -- "$file")" == "$(id -u)" ]] || die "cache target is not owned by the current user"
-    chmod 0600 -- "$file"
+snapshot_cache_file() {
+  local target="$1" snapshot
+  snapshot_counter=$((snapshot_counter + 1))
+  snapshot="$session_dir/.oma-sleeper.snapshot.$snapshot_counter"
+  if ln -P -- "$target" "$snapshot" 2>/dev/null; then
+    temporary_files+=("$snapshot")
+    [[ -f "$snapshot" && ! -L "$snapshot" ]] || die "cache target must be a regular file, not a symlink"
+    [[ "$(stat -c %u -- "$snapshot")" == "$(id -u)" ]] || die "cache target is not owned by the current user"
+    chmod 0600 -- "$snapshot"
+    CACHE_FILE="$snapshot"
+    return 0
   fi
+  [[ ! -e "$target" && ! -L "$target" ]] || die "cache target could not be safely snapshotted"
+  return 1
 }
 
 valid_json_file() {
@@ -103,8 +119,9 @@ download_json() {
 
 atomic_replace() {
   local source="$1" target="$2"
-  assert_safe_target "$target"
   chmod 0600 -- "$source"
+  # target is beneath cache_anchor, an already-open directory descriptor.
+  # rename(2) replaces a leaf symlink rather than following it.
   mv -T -- "$source" "$target"
 }
 
@@ -118,34 +135,46 @@ write_default_json() {
 
 cache_fetch() {
   local name="$1" max_age="$2" url="$3" max_bytes="$4" schema="$5" not_found_status="${6:-1}"
-  local now modified age status
+  local now modified=0 age status existing=0
   cache_path "$name"
-  assert_safe_target "$CACHE_FILE"
+  if snapshot_cache_file "$CACHE_TARGET"; then
+    existing=1
+    modified="$(stat -c %Y -- "$CACHE_FILE" 2>/dev/null || printf 0)"
+  fi
   now="$(date +%s)"
-  modified="$(stat -c %Y -- "$CACHE_FILE" 2>/dev/null || printf 0)"
   [[ "$modified" =~ ^[0-9]+$ ]] || modified=0
   age=$((now - modified))
-  if [[ "$metadata_mode" == force ]] || ! valid_json_file "$CACHE_FILE" "$max_bytes" "$schema" || (( age >= max_age )); then
+  if [[ "$metadata_mode" == force ]] || (( ! existing )) || ! valid_json_file "$CACHE_FILE" "$max_bytes" "$schema" || (( age >= max_age )); then
     status=0
     download_json "$url" "$max_bytes" "$schema" || status=$?
     if (( status != 0 )); then
       (( status == 44 )) && return "$not_found_status"
       return 1
     fi
-    atomic_replace "$DOWNLOAD_FILE" "$CACHE_FILE"
+    atomic_replace "$DOWNLOAD_FILE" "$CACHE_TARGET"
+    snapshot_cache_file "$CACHE_TARGET" || die "updated cache file could not be snapshotted"
+    valid_json_file "$CACHE_FILE" "$max_bytes" "$schema" || die "updated cache snapshot failed validation"
   fi
 }
 
 refresh_cache_or_default() {
   local name="$1" url="$2" max_bytes="$3" schema="$4" default_json="$5"
-  local existing_valid=0
+  local existing_valid=0 existing_file=""
   cache_path "$name"
-  assert_safe_target "$CACHE_FILE"
-  valid_json_file "$CACHE_FILE" "$max_bytes" "$schema" && existing_valid=1
+  if snapshot_cache_file "$CACHE_TARGET"; then
+    existing_file="$CACHE_FILE"
+    valid_json_file "$existing_file" "$max_bytes" "$schema" && existing_valid=1
+  fi
   if download_json "$url" "$max_bytes" "$schema"; then
-    atomic_replace "$DOWNLOAD_FILE" "$CACHE_FILE"
+    atomic_replace "$DOWNLOAD_FILE" "$CACHE_TARGET"
+    snapshot_cache_file "$CACHE_TARGET" || die "refreshed cache file could not be snapshotted"
+    valid_json_file "$CACHE_FILE" "$max_bytes" "$schema" || die "refreshed cache snapshot failed validation"
   elif (( ! existing_valid )); then
-    write_default_json "$CACHE_FILE" "$default_json" "$max_bytes" "$schema"
+    write_default_json "$CACHE_TARGET" "$default_json" "$max_bytes" "$schema"
+    snapshot_cache_file "$CACHE_TARGET" || die "default cache file could not be snapshotted"
+    valid_json_file "$CACHE_FILE" "$max_bytes" "$schema" || die "default cache snapshot failed validation"
+  else
+    CACHE_FILE="$existing_file"
   fi
 }
 

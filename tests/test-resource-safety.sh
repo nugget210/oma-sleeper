@@ -40,6 +40,20 @@ done
 
 printf '%s\t%s\t%s\n' "$url" "$output" "$max_bytes" >> "${CURL_LOG:?}"
 
+if [[ "${FAKE_MODE:-normal}" == replace_parent && ! -e "${CACHE_SWAP_ROOT:?}/parent-swapped" ]]; then
+  touch "$CACHE_SWAP_ROOT/parent-swapped"
+  mv "$XDG_CACHE_HOME/oma-sleeper" "$CACHE_SWAP_ROOT/original-cache"
+  mkdir "$CACHE_SWAP_ROOT/replacement-cache"
+  ln -s "$CACHE_SWAP_ROOT/replacement-cache" "$XDG_CACHE_HOME/oma-sleeper"
+fi
+
+if [[ "${FAKE_MODE:-normal}" == replace_leaf && "$url" == */matchups/1 && ! -e "${CACHE_SWAP_ROOT:?}/leaf-swapped" ]]; then
+  touch "$CACHE_SWAP_ROOT/leaf-swapped"
+  replacement="$XDG_CACHE_HOME/oma-sleeper/.replacement-league"
+  printf '{"league_id":"1234567890123456789","name":"<b>Replaced</b>","season":"2026","roster_positions":["QB","BN"],"scoring_settings":{}}' > "$replacement"
+  mv -T "$replacement" "$XDG_CACHE_HOME/oma-sleeper/league-1234567890123456789.json"
+fi
+
 case "$url" in
   */state/nfl)
     if [[ "${FAKE_MODE:-normal}" == malicious_week ]]; then
@@ -126,7 +140,7 @@ printf 'unchanged' > "$test_root/outside"
 ln -s "$test_root/outside" "$symlink_cache/oma-sleeper/league-1234567890123456789.json"
 run_failing_case normal "$symlink_cache" 1234567890123456789 1 normal
 [[ "$(cat "$test_root/outside")" == unchanged ]]
-grep -q 'must not be a symlink' "$test_root/error"
+grep -q 'not a symlink' "$test_root/error"
 
 directory_link_cache="$test_root/directory-link-cache"
 mkdir -p "$directory_link_cache" "$test_root/linked-cache-target"
@@ -137,7 +151,7 @@ grep -q 'cache directory must not be a symlink' "$test_root/error"
 normal_cache="$test_root/normal-cache"
 mkdir -p "$normal_cache"
 : > "$test_root/curl.log"
-FAKE_MODE=normal CURL_LOG="$test_root/curl.log" PATH="$test_root/bin:$PATH" XDG_CACHE_HOME="$normal_cache" \
+FAKE_MODE=normal CURL_LOG="$test_root/curl.log" CACHE_SWAP_ROOT="$test_root" PATH="$test_root/bin:$PATH" XDG_CACHE_HOME="$normal_cache" \
   "$repo_dir/bin/sleeper-matchup" 1234567890123456789 18 force > "$test_root/output"
 jq -e '.week == 18 and (.teams | length) == 1 and (.games | length) == 1' "$test_root/output" >/dev/null
 
@@ -146,7 +160,7 @@ matchup_requests="$(awk -F '\t' '$1 ~ /\/matchups\/[0-9]+$/ {count++} END {print
 mapfile -t download_paths < <(awk -F '\t' '$2 != "" {print $2}' "$test_root/curl.log")
 (( ${#download_paths[@]} >= 10 ))
 for path in "${download_paths[@]}"; do
-  [[ "$path" == "$normal_cache/oma-sleeper/".oma-sleeper.* ]]
+  [[ "$path" == /proc/self/fd/*/.oma-sleeper.session.*/*.oma-sleeper.download.* ]]
 done
 [[ -z "$(printf '%s\n' "${download_paths[@]}" | sort | uniq -d)" ]]
 awk -F '\t' '$3 !~ /^[0-9]+$/ || $3 <= 0 {exit 1}' "$test_root/curl.log"
@@ -155,5 +169,24 @@ awk -F '\t' '$3 !~ /^[0-9]+$/ || $3 <= 0 {exit 1}' "$test_root/curl.log"
 [[ -z "$(find "$normal_cache/oma-sleeper" -maxdepth 1 -name '*.tmp' -print -quit)" ]]
 while IFS= read -r file; do [[ "$(stat -c %a "$file")" == 600 ]]; done \
   < <(find "$normal_cache/oma-sleeper" -maxdepth 1 -type f -name '*.json')
+
+parent_cache="$test_root/parent-cache"
+mkdir -p "$parent_cache" "$test_root/parent-swap"
+: > "$test_root/curl.log"
+FAKE_MODE=replace_parent CURL_LOG="$test_root/curl.log" CACHE_SWAP_ROOT="$test_root/parent-swap" \
+  PATH="$test_root/bin:$PATH" XDG_CACHE_HOME="$parent_cache" \
+  "$repo_dir/bin/sleeper-matchup" 1234567890123456789 1 force > "$test_root/parent-output"
+jq -e '.league_name == "League" and .week == 1' "$test_root/parent-output" >/dev/null
+[[ -L "$parent_cache/oma-sleeper" ]]
+[[ -f "$test_root/parent-swap/original-cache/league-1234567890123456789.json" ]]
+[[ -z "$(find "$test_root/parent-swap/replacement-cache" -mindepth 1 -print -quit)" ]]
+
+: > "$test_root/curl.log"
+mkdir -p "$test_root/leaf-swap"
+FAKE_MODE=replace_leaf CURL_LOG="$test_root/curl.log" CACHE_SWAP_ROOT="$test_root/leaf-swap" \
+  PATH="$test_root/bin:$PATH" XDG_CACHE_HOME="$normal_cache" \
+  "$repo_dir/bin/sleeper-matchup" 1234567890123456789 1 normal > "$test_root/leaf-output"
+jq -e '.league_name == "League" and .week == 1' "$test_root/leaf-output" >/dev/null
+jq -e '.name == "<b>Replaced</b>"' "$normal_cache/oma-sleeper/league-1234567890123456789.json" >/dev/null
 
 echo "Resource-safety tests passed"

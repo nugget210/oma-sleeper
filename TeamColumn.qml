@@ -30,15 +30,15 @@ Column {
   }
   Row {
     width: parent.width; spacing: Style.space(8)
-    Text { width: parent.width-scoreGroup.width-parent.spacing; text: (!root.plainScores && root.leading && root.colorMode !== "minimal" ? "▲ " : (!root.plainScores && root.trailing && root.colorMode !== "minimal" ? "▼ " : "")) + root.teamName; elide: Text.ElideRight; color: root.emphasis; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+    Text { width: parent.width-scoreGroup.width-parent.spacing; text: (!root.plainScores && root.leading && root.colorMode !== "minimal" ? "▲ " : (!root.plainScores && root.trailing && root.colorMode !== "minimal" ? "▼ " : "")) + root.teamName; textFormat: Text.PlainText; elide: Text.ElideRight; color: root.emphasis; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
     Row {
       id: scoreGroup; spacing: Style.space(10)
-      Text { anchors.baseline: currentScoreText.baseline; text: root.hasProjectedScore ? Number(root.projectedScore).toFixed(2) : "—"; color: Qt.darker(root.bar.foreground,1.45); font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
-      Text { id: currentScoreText; text: Number(root.teamScore||0).toFixed(1); color: root.emphasis; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title + 2; font.bold: true }
+      Text { anchors.baseline: currentScoreText.baseline; text: root.hasProjectedScore ? Number(root.projectedScore).toFixed(2) : "—"; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.45); font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+      Text { id: currentScoreText; text: Number(root.teamScore||0).toFixed(1); textFormat: Text.PlainText; color: root.emphasis; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title + 2; font.bold: true }
     }
   }
-  Text { text: "STARTERS"; color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
+  Text { text: "STARTERS"; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
   Repeater { model: root.game ? root.game.starters : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode } }
-  Text { text: "BENCH"; topPadding: Style.space(8); color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
+  Text { text: "BENCH"; textFormat: Text.PlainText; topPadding: Style.space(8); color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
   Repeater { model: root.game ? root.game.bench : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode } }
 }

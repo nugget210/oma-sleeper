@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "nugget210.oma-sleeper",
   "name": "Sleeper Matchup",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "author": "nugget210",
   "description": "Live Sleeper fantasy matchup score and lineup panel",
   "kinds": ["bar-widget"],
