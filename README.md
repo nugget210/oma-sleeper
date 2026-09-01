@@ -4,6 +4,14 @@ A theme-aware Omarchy bar widget for live Sleeper fantasy football matchups.
 
 The compact bar score opens a two-column matchup panel containing teams, starters, bench players, positions, NFL teams, and live fantasy points. It uses Omarchy's active font and theme tokens, with optional performance and monochrome colour modes.
 
+## Preview
+
+![Live Sleeper fantasy matchup scoreboard](preview.png)
+
+The compact menubar view keeps the current matchup visible at a glance:
+
+![Compact Sleeper matchup score in the Omarchy menubar](assets/oma-sleeper-menubar.png)
+
 ## Requirements
 
 - Omarchy 4.x with `omarchy-shell`
