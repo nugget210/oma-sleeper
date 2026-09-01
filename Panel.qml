@@ -165,9 +165,11 @@ Panel {
   function updateLeague() {
     var id = leagueIdFromInput(leagueField.text)
     if (!id) {
-      settingsMessage = "Enter a Sleeper league URL or numeric league ID"
+      settingsMessage = ""
+      errorText = "No league ID found — paste a Sleeper league URL or numeric league ID"
       return
     }
+    errorText = ""
     settingsMessage = "Syncing league…"
     data = null
     saveEntry(id, 0, labelField.text.trim(), root.colorMode, root.playerDisplayMode, opponentField.text.trim())
@@ -193,7 +195,17 @@ Panel {
         catch(e) { root.errorText = "Could not read matchup data" }
       }
     }
-    onExited: function(code) { root.loading = false; root.forceMetadataRefresh = false; if (code !== 0) root.errorText = "Sleeper is unavailable" }
+    onExited: function(code) {
+      root.loading = false
+      root.forceMetadataRefresh = false
+      if (code === 44) {
+        root.settingsMessage = ""
+        root.errorText = "League not found — check the URL, ID, or current season"
+      } else if (code !== 0) {
+        root.settingsMessage = ""
+        root.errorText = "Sleeper is unavailable — check your connection and try again"
+      }
+    }
   }
   Timer {
     id: refreshTimer

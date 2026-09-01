@@ -13,14 +13,18 @@ api="https://api.sleeper.app/v1"
 curl_args=(-fsS --max-time 12)
 
 cache_fetch() {
-  local name="$1" max_age="$2" url="$3"
-  local file="$cache_dir/$name.json" now modified age tmp
+  local name="$1" max_age="$2" url="$3" not_found_status="${4:-1}"
+  local file="$cache_dir/$name.json" now modified age tmp http_code
   now="$(date +%s)"
   modified="$(stat -c %Y "$file" 2>/dev/null || echo 0)"
   age=$((now - modified))
   if [[ "$metadata_mode" == force ]] || [[ ! -s "$file" ]] || (( age >= max_age )); then
     tmp="$file.tmp"
-    curl "${curl_args[@]}" "$url" -o "$tmp"
+    if ! http_code="$(curl "${curl_args[@]}" --write-out '%{http_code}' "$url" -o "$tmp")"; then
+      rm -f "$tmp"
+      [[ "$http_code" == 404 ]] && return "$not_found_status"
+      return 1
+    fi
     mv "$tmp" "$file"
   fi
   cat "$file"
@@ -31,7 +35,18 @@ if [[ "$week" == auto ]]; then
   week="$(jq -r '.display_week // .week // 1' <<<"$nfl_state")"
 fi
 
-league="$(cache_fetch "league-$league_id" 3600 "$api/league/$league_id")"
+league_status=0
+league="$(cache_fetch "league-$league_id" 3600 "$api/league/$league_id" 44)" || league_status=$?
+if (( league_status == 44 )); then
+  echo "League not found" >&2
+  exit 44
+elif (( league_status != 0 )); then
+  exit "$league_status"
+fi
+if ! jq -e 'type == "object" and (.league_id // "") != ""' <<<"$league" >/dev/null 2>&1; then
+  echo "League not found" >&2
+  exit 44
+fi
 users="$(cache_fetch "users-$league_id" 3600 "$api/league/$league_id/users")"
 rosters="$(cache_fetch "rosters-$league_id" 3600 "$api/league/$league_id/rosters")"
 matchups="$(curl "${curl_args[@]}" "$api/league/$league_id/matchups/$week")"
