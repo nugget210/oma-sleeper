@@ -40,11 +40,7 @@ No league, roster, team name, or bar label is included in the plugin defaults.
 - External-link icon: open the matchup on Sleeper
 - Refresh icon: refresh immediately
 
-## Live-game preview
-
-The settings pane includes **Leading**, **Trailing**, and **Off** preview controls. Preview mode applies deterministic in-progress scores to the currently loaded teams and players so the bar, score rails, colours, player rows, and directional indicators can be reviewed before the season starts.
-
-Preview scores are local and temporary. They are never sent to Sleeper, do not replace fetched matchup data, and reset when the shell restarts.
+## Live matchup data
 
 During games, each active player shows the NFL quarter, clock, and a progress rail. With at least two prior league weeks available, the current score is compared with that player's rolling fantasy average at the same game progress: green/`▲` is above pace, orange/`●` is near pace, and urgent red/`▼` is below pace. Pregame and insufficient-history states remain neutral.
 

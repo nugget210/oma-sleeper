@@ -36,13 +36,6 @@ BarWidget {
       if (widgets[i] && typeof widgets[i].receiveData === "function") widgets[i].receiveData(value)
   }
   function receiveData(value) { if (panelLoader.item) panelLoader.item.data = value }
-  function publishPreview(scenario) {
-    var widgets = siblingWidgets()
-    for (var i = 0; i < widgets.length; i++)
-      if (widgets[i] && typeof widgets[i].receivePreview === "function") widgets[i].receivePreview(scenario)
-  }
-  function receivePreview(scenario) { if (panelLoader.item) panelLoader.item.previewScenario = scenario }
-
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
   onBarChanged: injectPanel()

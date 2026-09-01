@@ -20,8 +20,6 @@ Panel {
   property string settingsMessage: ""
   property bool forceMetadataRefresh: false
   property double lastHeartbeatMs: Date.now()
-  property string previewScenario: "off"
-
   readonly property string leagueId: String(setting("leagueId", ""))
   readonly property int selectedRosterId: parseInt(setting("rosterId", 0), 10) || 0
   readonly property string shortName: String(setting("shortName", ""))
@@ -31,7 +29,6 @@ Panel {
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 2), 10) || 2) // retained for settings compatibility
   readonly property string syncState: data && data.sync_state ? String(data.sync_state) : "idle"
   readonly property int adaptiveIntervalMs: data && Number(data.next_refresh_seconds) > 0 ? Number(data.next_refresh_seconds) * 1000 : 900000
-  readonly property var viewData: previewScenario === "off" ? data : buildPreviewData(data, previewScenario)
   readonly property var myGame: gameFor(selectedRosterId)
   readonly property var opponentGame: opponentFor(myGame)
   readonly property real widestPlayerLabel: widestLineupLabel(myGame, opponentGame)
@@ -114,54 +111,20 @@ Panel {
     if (completed > 0) return "final"
     return "idle"
   }
-  function buildPreviewData(source, scenario) {
-    if (!source || !source.games) return source
-    var copy = JSON.parse(JSON.stringify(source))
-    var mine = null
-    var theirs = null
-    for (var i = 0; i < copy.games.length; i++) {
-      if (copy.games[i].roster_id === selectedRosterId) mine = copy.games[i]
-    }
-    if (!mine) return copy
-    for (var j = 0; j < copy.games.length; j++) {
-      if (copy.games[j].matchup_id === mine.matchup_id && copy.games[j].roster_id !== mine.roster_id) theirs = copy.games[j]
-    }
-    if (!theirs) return copy
-
-    var high = [22.8,18.4,7.1,13.7,9.8,6.4,12.2,8.9,11.0,6.0]
-    var low = [18.2,9.6,10.1,11.4,7.3,4.8,8.1,6.2,9.0,5.0]
-    applyPreviewPoints(mine, scenario === "leading" ? high : low)
-    applyPreviewPoints(theirs, scenario === "leading" ? low : high)
-    copy.sync_state = "live"
-    return copy
-  }
-  function applyPreviewPoints(game, points) {
-    var total = 0
-    for (var i = 0; i < game.starters.length; i++) {
-      var value = i < points.length ? points[i] : 0
-      game.starters[i].points = value
-      game.starters[i].expected_samples = 4
-      game.starters[i].expected = value === 0 ? 8 : (value / 0.58) * ([0.72,1.0,1.35][i % 3])
-      game.starters[i].game_status = {state:"in", period:3, clock:"6:18", progress:0.58}
-      total += value
-    }
-    for (var j = 0; j < game.bench.length; j++) { game.bench[j].points = j < 2 ? [5.6,2.3][j] : 0; game.bench[j].game_status={state:"in",period:3,clock:"6:18",progress:0.58} }
-    game.points = Math.round(total * 10) / 10
-  }
   function gameFor(id) {
-    if (!viewData || !viewData.games) return null
-    for (var i=0; i<viewData.games.length; i++) if (viewData.games[i].roster_id === id) return viewData.games[i]
+    if (!data || !data.games) return null
+    for (var i=0; i<data.games.length; i++) if (data.games[i].roster_id === id) return data.games[i]
     return null
   }
   function opponentFor(game) {
-    if (!game || !viewData) return null
-    for (var i=0; i<viewData.games.length; i++)
-      if (viewData.games[i].matchup_id === game.matchup_id && viewData.games[i].roster_id !== game.roster_id) return viewData.games[i]
+    if (!game || !data) return null
+    for (var i=0; i<data.games.length; i++)
+      if (data.games[i].matchup_id === game.matchup_id && data.games[i].roster_id !== game.roster_id) return data.games[i]
     return null
   }
   function teamName(id) {
-    if (!viewData || !viewData.teams) return "Roster " + id
-    for (var i=0; i<viewData.teams.length; i++) if (viewData.teams[i].roster_id === id) return viewData.teams[i].name
+    if (!data || !data.teams) return "Roster " + id
+    for (var i=0; i<data.teams.length; i++) if (data.teams[i].roster_id === id) return data.teams[i].name
     return "Roster " + id
   }
   function abbreviation(name) {
@@ -194,11 +157,6 @@ Panel {
   function persist(rosterId, label) { saveEntry(root.leagueId, rosterId, label, root.colorMode, root.playerDisplayMode, opponentField.text.trim()) }
   function setColorMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), mode, root.playerDisplayMode, opponentField.text.trim()) }
   function setPlayerDisplayMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), root.colorMode, mode, opponentField.text.trim()) }
-  function setPreviewScenario(scenario) {
-    if (root.hostWidget && typeof root.hostWidget.publishPreview === "function")
-      root.hostWidget.publishPreview(scenario)
-    else root.previewScenario = scenario
-  }
   function leagueIdFromInput(value) {
     var text = String(value || "").trim()
     var match = text.match(/(?:leagues\/)?(\d{10,})/)
@@ -287,7 +245,7 @@ Panel {
 
           Item {
             width: parent.width; height: Style.space(32)
-            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: root.data ? root.data.league_name + " · Week " + root.data.week + (root.previewScenario !== "off" ? " · LIVE PREVIEW" : "") : "Sleeper matchup"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: root.data ? root.data.league_name + " · Week " + root.data.week : "Sleeper matchup"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
             Row {
               anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: Style.space(8)
               Repeater {
@@ -372,23 +330,6 @@ Panel {
               text: root.playerDisplayMode === "scores" ? "Plain names and scores, with progress rails, pace colours, and symbols hidden." : (root.playerDisplayMode === "progress" ? "Shows neutral live clocks and game-progress rails without pace styling." : (root.playerDisplayMode === "pace" ? "Shows pace colours and symbols without live clocks or progress rails." : "Shows live game progress and pace indicators together."))
               color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
             }
-            Text { text: "Live-game preview"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
-            Row {
-              spacing: Style.space(8)
-              Repeater {
-                model: [{id:"leading",label:"Leading"},{id:"trailing",label:"Trailing"},{id:"off",label:"Off"}]
-                Rectangle {
-                  required property var modelData
-                  width: previewLabel.implicitWidth + Style.space(24); height: Style.space(32); radius: Style.cornerRadius
-                  color: modelData.id === root.previewScenario ? Style.selectedFillFor(root.bar.foreground, Color.accent) : (previewArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent")
-                  border.width: 1
-                  border.color: modelData.id === root.previewScenario ? Color.accent : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.18)
-                  Text { id: previewLabel; anchors.centerIn: parent; text: modelData.label; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
-                  MouseArea { id: previewArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.setPreviewScenario(modelData.id); if (modelData.id !== "off") root.settingsOpen=false } }
-                }
-              }
-            }
-            Text { text: "Preview scores are local, temporary, and never sent to Sleeper."; color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
             Text { text: "Fantasy team"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
             Column {
               width: parent.width
