@@ -6,8 +6,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "oma-sleeper"
-  ipcTarget: "oma-sleeper"
+  moduleName: "nugget210.oma-sleeper"
+  ipcTarget: "nugget210.oma-sleeper"
   manageIpc: false
 
   property var anchorItem: null

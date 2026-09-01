@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-plugin_id="oma-sleeper"
+plugin_id="nugget210.oma-sleeper"
 source_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 target_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$plugin_id"
 

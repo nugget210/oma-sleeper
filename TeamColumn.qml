@@ -29,12 +29,12 @@ Column {
     Rectangle { width: parent.width * root.share; height: parent.height; radius: height/2; color: root.colorMode === "minimal" ? root.bar.foreground : root.emphasis; opacity: root.hasScore ? 1 : .35 }
   }
   Row {
-    width: parent.width
-    Text { width: parent.width-scoreGroup.width-Style.space(8); text: (!root.plainScores && root.leading && root.colorMode !== "minimal" ? "▲ " : (!root.plainScores && root.trailing && root.colorMode !== "minimal" ? "▼ " : "")) + root.teamName; elide: Text.ElideRight; color: root.emphasis; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+    width: parent.width; spacing: Style.space(8)
+    Text { width: parent.width-scoreGroup.width-parent.spacing; text: (!root.plainScores && root.leading && root.colorMode !== "minimal" ? "▲ " : (!root.plainScores && root.trailing && root.colorMode !== "minimal" ? "▼ " : "")) + root.teamName; elide: Text.ElideRight; color: root.emphasis; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
     Row {
-      id: scoreGroup; spacing: Style.space(6)
+      id: scoreGroup; spacing: Style.space(10)
       Text { anchors.baseline: currentScoreText.baseline; text: root.hasProjectedScore ? Number(root.projectedScore).toFixed(2) : "—"; color: Qt.darker(root.bar.foreground,1.45); font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
-      Text { id: currentScoreText; text: Number(root.teamScore||0).toFixed(1); color: root.emphasis; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+      Text { id: currentScoreText; text: Number(root.teamScore||0).toFixed(1); color: root.emphasis; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title + 2; font.bold: true }
     }
   }
   Text { text: "STARTERS"; color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }

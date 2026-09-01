@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "oma-sleeper",
+  "id": "nugget210.oma-sleeper",
   "name": "Sleeper Matchup",
   "version": "2.4.0",
-  "author": "Omarchy community",
+  "author": "nugget210",
   "description": "Live Sleeper fantasy matchup score and lineup panel",
   "kinds": ["bar-widget"],
   "entryPoints": { "barWidget": "BarWidget.qml" },

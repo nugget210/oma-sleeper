@@ -16,12 +16,10 @@ Sleeper's read-only league API does not require authentication.
 ## Install
 
 ```bash
-gh repo clone OWNER/oma-sleeper
-cd oma-sleeper
-./install.sh
+omarchy plugin add https://github.com/nugget210/oma-sleeper.git --enable
 ```
 
-The installer copies the plugin to `~/.config/omarchy/plugins/oma-sleeper` and places it immediately before the clock.
+Omarchy installs the plugin as `nugget210.oma-sleeper`. Choose a bar position when prompted.
 
 ## Set up
 
@@ -82,16 +80,26 @@ Pregame and tied matchups remain neutral. Colour is reinforced by score rails an
 
 The score detail and colour settings are independent. For the quietest presentation, use **Scores only** with **Minimal** colours.
 
-## Uninstall
+## Update
 
-Remove `oma-sleeper` from `~/.config/omarchy/shell.json`, then remove:
+Git-managed installations can be updated with:
 
-```text
-~/.config/omarchy/plugins/oma-sleeper
+```bash
+omarchy plugin update nugget210.oma-sleeper
 ```
 
-Restart the shell with `omarchy restart shell`.
+## Uninstall
+
+Remove the plugin with:
+
+```bash
+omarchy plugin remove nugget210.oma-sleeper
+```
 
 ## Data source
 
 League, roster, matchup, and player information comes from the public [Sleeper API](https://docs.sleeper.com/).
+
+## License
+
+[MIT](LICENSE)
