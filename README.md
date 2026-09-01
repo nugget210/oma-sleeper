@@ -20,6 +20,7 @@ The compact menubar view keeps the current matchup visible at a glance:
 - A public Sleeper fantasy football league
 
 Sleeper's read-only league API does not require authentication.
+Because `curl` and `jq` are external system dependencies, the marketplace may classify the plugin as requiring manual setup until they are installed.
 
 ## Install
 
@@ -58,7 +59,7 @@ Before the round begins, team and player scores remain at zero while the team he
 
 The compact bar derives matchup state from the NFL games attached to both starting lineups. It shows `UPCOMING` while starter games are scheduled and `● LIVE` when any starter is playing. Completed slates have no status suffix for now. If schedule data is unavailable, no status suffix is shown rather than guessing.
 
-Player metadata is cached once per day in `~/.cache/oma-sleeper` because Sleeper recommends fetching the full NFL player map sparingly. League, user, and roster metadata is cached for one hour. Matchup scores use adaptive refresh intervals:
+Player metadata is cached once per day in `~/.cache/oma-sleeper` because Sleeper recommends fetching the full NFL player map sparingly. League, user, and roster metadata is cached for one hour. Pace comparisons use at most the four previous matchup weeks. Matchup scores use adaptive refresh intervals:
 
 - 60 seconds while an NFL game is live
 - 5 minutes when a game starts within three hours
@@ -66,6 +67,10 @@ Player metadata is cached once per day in `~/.cache/oma-sleeper` because Sleeper
 - Immediately when the panel opens, the refresh button is selected, or the computer wakes
 
 Sleeper remains the source of all fantasy data. The public ESPN NFL scoreboard supplies only the live/upcoming/idle game-clock signal used to choose a refresh interval.
+
+## Resource safety
+
+All remote responses have endpoint-specific download and collection limits and must pass a JSON schema check before use. League IDs, NFL weeks, seasons, roster IDs, player IDs, names, and score collections are type-checked and bounded. Cached responses are stored as owner-only files through unique temporary files inside an owner-only cache directory, then atomically renamed after size and schema validation. The generated QML payload is capped at 2 MiB and the interface renders at most 64 teams, 32 starters, and 32 bench players per team.
 
 ## Colour modes
 

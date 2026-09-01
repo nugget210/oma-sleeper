@@ -20,6 +20,9 @@ Panel {
   property string settingsMessage: ""
   property bool forceMetadataRefresh: false
   property double lastHeartbeatMs: Date.now()
+  readonly property int maxTeams: 64
+  readonly property int maxPlayersPerSection: 32
+  readonly property int maxPayloadCharacters: 2097152
   readonly property string leagueId: String(setting("leagueId", ""))
   readonly property int selectedRosterId: parseInt(setting("rosterId", 0), 10) || 0
   readonly property string shortName: String(setting("shortName", ""))
@@ -159,8 +162,31 @@ Panel {
   function setPlayerDisplayMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), root.colorMode, mode, opponentField.text.trim()) }
   function leagueIdFromInput(value) {
     var text = String(value || "").trim()
-    var match = text.match(/(?:leagues\/)?(\d{10,})/)
+    if (/^\d{10,24}$/.test(text)) return text
+    var match = text.match(/\/leagues\/(\d{10,24})(?:\/|$)/)
     return match ? match[1] : ""
+  }
+  function boundedResult(result) {
+    if (!result || typeof result !== "object") throw new Error("Invalid result")
+    if (!/^\d{10,24}$/.test(String(result.league_id || ""))) throw new Error("Invalid league ID")
+    if (String(result.league_id) !== root.leagueId) throw new Error("Mismatched league ID")
+    var week = Number(result.week)
+    if (!Number.isInteger(week) || week < 1 || week > 18) throw new Error("Invalid week")
+    if (!Array.isArray(result.teams) || result.teams.length > root.maxTeams) throw new Error("Too many teams")
+    if (!Array.isArray(result.games) || result.games.length > root.maxTeams) throw new Error("Too many games")
+    result.teams = result.teams.slice(0, root.maxTeams)
+    result.games = result.games.slice(0, root.maxTeams)
+    for (var i = 0; i < result.games.length; i++) {
+      var game = result.games[i]
+      if (!game || typeof game !== "object") throw new Error("Invalid game")
+      if (!Array.isArray(game.starters) || game.starters.length > root.maxPlayersPerSection)
+        throw new Error("Too many starters")
+      if (!Array.isArray(game.bench) || game.bench.length > root.maxPlayersPerSection)
+        throw new Error("Too many bench players")
+      game.starters = game.starters.slice(0, root.maxPlayersPerSection)
+      game.bench = game.bench.slice(0, root.maxPlayersPerSection)
+    }
+    return result
   }
   function updateLeague() {
     var id = leagueIdFromInput(leagueField.text)
@@ -176,7 +202,8 @@ Panel {
     Qt.callLater(function() { refresh(true) })
   }
   function openSleeper() {
-    if (root.bar && root.leagueId !== "") root.bar.run("xdg-open 'https://sleeper.com/leagues/" + root.leagueId + "/matchup'")
+    if (root.bar && /^\d{10,24}$/.test(root.leagueId))
+      root.bar.run("xdg-open 'https://sleeper.com/leagues/" + root.leagueId + "/matchup'")
   }
 
   Process {
@@ -186,7 +213,9 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         try {
-          var result = JSON.parse(String(text))
+          var payload = String(text)
+          if (payload.length > root.maxPayloadCharacters) throw new Error("Matchup response is too large")
+          var result = root.boundedResult(JSON.parse(payload))
           if (root.hostWidget && typeof root.hostWidget.publishData === "function") root.hostWidget.publishData(result)
           else root.data = result
           root.errorText = ""

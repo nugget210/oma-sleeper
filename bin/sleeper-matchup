@@ -1,146 +1,392 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly MAX_WEEK=18 MAX_HISTORY_WEEKS=4 MAX_TEAMS=64 MAX_STARTERS=32 MAX_BENCH=32
+readonly MAX_STATE_BYTES=$((64 * 1024)) MAX_LEAGUE_BYTES=$((512 * 1024))
+readonly MAX_USERS_BYTES=$((2 * 1024 * 1024)) MAX_ROSTERS_BYTES=$((2 * 1024 * 1024))
+readonly MAX_MATCHUPS_BYTES=$((4 * 1024 * 1024)) MAX_PROJECTIONS_BYTES=$((16 * 1024 * 1024))
+readonly MAX_SCOREBOARD_BYTES=$((4 * 1024 * 1024)) MAX_PLAYERS_BYTES=$((32 * 1024 * 1024))
+readonly MAX_HISTORY_BYTES=$((MAX_HISTORY_WEEKS * MAX_MATCHUPS_BYTES)) MAX_OUTPUT_BYTES=$((2 * 1024 * 1024))
+
 league_id="${1:?league id required}"
-week="${2:-auto}"
+week_arg="${2:-auto}"
 metadata_mode="${3:-normal}"
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-plugin_dir="$(dirname -- "$script_dir")"
-cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/oma-sleeper"
-mkdir -p "$cache_dir"
 
-api="https://api.sleeper.app/v1"
-curl_args=(-fsS --max-time 12)
+die() { echo "sleeper-matchup: $*" >&2; exit 1; }
 
-cache_fetch() {
-  local name="$1" max_age="$2" url="$3" not_found_status="${4:-1}"
-  local file="$cache_dir/$name.json" now modified age tmp http_code
-  now="$(date +%s)"
-  modified="$(stat -c %Y "$file" 2>/dev/null || echo 0)"
-  age=$((now - modified))
-  if [[ "$metadata_mode" == force ]] || [[ ! -s "$file" ]] || (( age >= max_age )); then
-    tmp="$file.tmp"
-    if ! http_code="$(curl "${curl_args[@]}" --write-out '%{http_code}' "$url" -o "$tmp")"; then
-      rm -f "$tmp"
-      [[ "$http_code" == 404 ]] && return "$not_found_status"
-      return 1
-    fi
-    mv "$tmp" "$file"
-  fi
-  cat "$file"
+bounded_uint() {
+  local raw="$1" minimum="$2" maximum="$3" label="$4" value
+  [[ "$raw" =~ ^[0-9]{1,4}$ ]] || die "invalid $label"
+  value=$((10#$raw))
+  (( value >= minimum && value <= maximum )) || die "invalid $label"
+  printf '%s\n' "$value"
 }
 
-if [[ "$week" == auto ]]; then
-  nfl_state="$(cache_fetch nfl-state 300 "$api/state/nfl")"
-  week="$(jq -r '.display_week // .week // 1' <<<"$nfl_state")"
+[[ "$league_id" =~ ^[0-9]{10,24}$ ]] || die "invalid league ID"
+[[ "$metadata_mode" == normal || "$metadata_mode" == force ]] || die "invalid metadata mode"
+if [[ "$week_arg" != auto ]]; then
+  week_arg="$(bounded_uint "$week_arg" 1 "$MAX_WEEK" week)"
+fi
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+plugin_dir="$(dirname -- "$script_dir")"
+cache_root="${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}"
+cache_dir="$cache_root/oma-sleeper"
+umask 077
+
+[[ ! -L "$cache_dir" ]] || die "cache directory must not be a symlink"
+[[ ! -e "$cache_dir" || -d "$cache_dir" ]] || die "cache path is not a directory"
+mkdir -p -- "$cache_dir"
+chmod 0700 -- "$cache_dir"
+cache_dir="$(cd -P -- "$cache_dir" && pwd)"
+[[ "$(stat -c %u -- "$cache_dir")" == "$(id -u)" ]] || die "cache directory is not owned by the current user"
+
+api="https://api.sleeper.app/v1"
+curl_args=(-fsS --proto '=https' --connect-timeout 5 --max-time 15)
+temporary_files=()
+
+cleanup() {
+  local file
+  for file in "${temporary_files[@]}"; do
+    [[ "$file" == "$cache_dir"/.oma-sleeper.* ]] && rm -f -- "$file"
+  done
+}
+trap cleanup EXIT
+
+new_temp_file() {
+  TEMP_FILE="$(mktemp --tmpdir="$cache_dir" .oma-sleeper.XXXXXXXX)"
+  temporary_files+=("$TEMP_FILE")
+}
+
+cache_path() {
+  local name="$1"
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || die "unsafe cache key"
+  CACHE_FILE="$cache_dir/$name.json"
+  [[ "$(dirname -- "$CACHE_FILE")" == "$cache_dir" ]] || die "cache path escaped cache directory"
+}
+
+assert_safe_target() {
+  local file="$1"
+  [[ ! -L "$file" ]] || die "cache target must not be a symlink"
+  [[ ! -e "$file" || -f "$file" ]] || die "cache target must be a regular file"
+  if [[ -e "$file" ]]; then
+    [[ "$(stat -c %u -- "$file")" == "$(id -u)" ]] || die "cache target is not owned by the current user"
+    chmod 0600 -- "$file"
+  fi
+}
+
+valid_json_file() {
+  local file="$1" max_bytes="$2" schema="$3" size
+  [[ -f "$file" && ! -L "$file" ]] || return 1
+  size="$(stat -c %s -- "$file" 2>/dev/null)" || return 1
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  (( size > 0 && size <= max_bytes )) || return 1
+  jq -e "$schema" "$file" >/dev/null 2>&1
+}
+
+download_json() {
+  local url="$1" max_bytes="$2" schema="$3" http_code size
+  new_temp_file
+  DOWNLOAD_FILE="$TEMP_FILE"
+  http_code=""
+  if ! http_code="$(curl "${curl_args[@]}" --max-filesize "$max_bytes" \
+      --write-out '%{http_code}' --output "$DOWNLOAD_FILE" "$url")"; then
+    rm -f -- "$DOWNLOAD_FILE"
+    [[ "$http_code" == 404 ]] && return 44
+    return 1
+  fi
+  size="$(stat -c %s -- "$DOWNLOAD_FILE" 2>/dev/null)" || return 1
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  (( size > 0 && size <= max_bytes )) || return 1
+  jq -e "$schema" "$DOWNLOAD_FILE" >/dev/null 2>&1 || return 1
+}
+
+atomic_replace() {
+  local source="$1" target="$2"
+  assert_safe_target "$target"
+  chmod 0600 -- "$source"
+  mv -T -- "$source" "$target"
+}
+
+write_default_json() {
+  local target="$1" content="$2" max_bytes="$3" schema="$4"
+  new_temp_file
+  printf '%s\n' "$content" > "$TEMP_FILE"
+  valid_json_file "$TEMP_FILE" "$max_bytes" "$schema" || die "invalid built-in JSON default"
+  atomic_replace "$TEMP_FILE" "$target"
+}
+
+cache_fetch() {
+  local name="$1" max_age="$2" url="$3" max_bytes="$4" schema="$5" not_found_status="${6:-1}"
+  local now modified age status
+  cache_path "$name"
+  assert_safe_target "$CACHE_FILE"
+  now="$(date +%s)"
+  modified="$(stat -c %Y -- "$CACHE_FILE" 2>/dev/null || printf 0)"
+  [[ "$modified" =~ ^[0-9]+$ ]] || modified=0
+  age=$((now - modified))
+  if [[ "$metadata_mode" == force ]] || ! valid_json_file "$CACHE_FILE" "$max_bytes" "$schema" || (( age >= max_age )); then
+    status=0
+    download_json "$url" "$max_bytes" "$schema" || status=$?
+    if (( status != 0 )); then
+      (( status == 44 )) && return "$not_found_status"
+      return 1
+    fi
+    atomic_replace "$DOWNLOAD_FILE" "$CACHE_FILE"
+  fi
+}
+
+refresh_cache_or_default() {
+  local name="$1" url="$2" max_bytes="$3" schema="$4" default_json="$5"
+  local existing_valid=0
+  cache_path "$name"
+  assert_safe_target "$CACHE_FILE"
+  valid_json_file "$CACHE_FILE" "$max_bytes" "$schema" && existing_valid=1
+  if download_json "$url" "$max_bytes" "$schema"; then
+    atomic_replace "$DOWNLOAD_FILE" "$CACHE_FILE"
+  elif (( ! existing_valid )); then
+    write_default_json "$CACHE_FILE" "$default_json" "$max_bytes" "$schema"
+  fi
+}
+
+readonly state_schema='type == "object" and
+  ((.display_week // .week) as $week |
+    ((($week | type) == "number") and ($week == ($week | floor)) and ($week >= 1 and $week <= 18))
+    or ((($week | type) == "string") and ($week | test("^[0-9]{1,2}$"))))'
+readonly league_schema='type == "object"
+  and length <= 256
+  and ((.league_id | type) == "string") and (.league_id | test("^[0-9]{10,24}$"))
+  and ((.season | type) == "string" or (.season | type) == "number")
+  and ((.name // "") | type) == "string" and ((.name // "") | length) <= 200
+  and (.roster_positions | type) == "array" and (.roster_positions | length) <= 32
+  and all(.roster_positions[]; (type == "string") and (length <= 16))
+  and (.scoring_settings | type) == "object" and (.scoring_settings | length) <= 128
+  and all(.scoring_settings | to_entries[];
+    (.key | type) == "string" and (.key | test("^[A-Za-z0-9_.-]{1,64}$"))
+    and (.value | type) == "number" and (.value >= -1000 and .value <= 1000))'
+readonly users_schema='type == "array" and length <= 64
+  and all(.[];
+    type == "object" and length <= 64
+    and (.user_id | type) == "string" and (.user_id | test("^[A-Za-z0-9_.-]{1,64}$"))
+    and ((.display_name // "") | type) == "string" and ((.display_name // "") | length) <= 200
+    and ((.metadata // {}) | type) == "object" and ((.metadata // {}) | length) <= 64
+    and (((.metadata // {}).team_name // "") | type) == "string"
+    and (((.metadata // {}).team_name // "") | length) <= 200)'
+readonly rosters_schema='type == "array" and length <= 64
+  and all(.[];
+    type == "object" and length <= 64
+    and (.roster_id | type) == "number" and .roster_id == (.roster_id | floor)
+    and (.roster_id >= 1 and .roster_id <= 64)
+    and ((.owner_id == null) or ((.owner_id | type) == "string" and (.owner_id | test("^[A-Za-z0-9_.-]{1,64}$"))))
+    and ((.players // []) | type) == "array" and ((.players // []) | length) <= 64
+    and all((.players // [])[]; (type == "string") and test("^[A-Za-z0-9_.-]{1,32}$"))
+    and ((.starters // []) | type) == "array" and ((.starters // []) | length) <= 32
+    and all((.starters // [])[]; (type == "string") and test("^[A-Za-z0-9_.-]{1,32}$")))'
+readonly matchups_schema='type == "array" and length <= 64
+  and all(.[];
+    type == "object" and length <= 64
+    and (.roster_id | type) == "number" and .roster_id == (.roster_id | floor)
+    and (.roster_id >= 1 and .roster_id <= 64)
+    and ((.matchup_id == null) or ((.matchup_id | type) == "number" and .matchup_id == (.matchup_id | floor) and .matchup_id >= 0 and .matchup_id <= 64))
+    and ((.players // []) | type) == "array" and ((.players // []) | length) <= 64
+    and all((.players // [])[]; (type == "string") and test("^[A-Za-z0-9_.-]{1,32}$"))
+    and ((.starters // []) | type) == "array" and ((.starters // []) | length) <= 32
+    and all((.starters // [])[]; (type == "string") and test("^[A-Za-z0-9_.-]{1,32}$"))
+    and ((.players_points // {}) | type) == "object" and ((.players_points // {}) | length) <= 64
+    and all((.players_points // {}) | to_entries[];
+      (.key | test("^[A-Za-z0-9_.-]{1,32}$")) and (.value | type) == "number" and (.value >= -1000000 and .value <= 1000000))
+    and ((.points // 0) | type) == "number" and ((.points // 0) >= -1000000 and (.points // 0) <= 1000000)
+    and ((.custom_points // 0) | type) == "number" and ((.custom_points // 0) >= -1000000 and (.custom_points // 0) <= 1000000))'
+readonly projections_schema='type == "object" and length <= 20000
+  and all(to_entries[];
+    (.key | type) == "string" and (.key | test("^[A-Za-z0-9_.-]{1,32}$"))
+    and (.value | type) == "object" and (.value | length) <= 256
+    and all(.value | to_entries[];
+      (.key | type) == "string" and (.key | test("^[A-Za-z0-9_.-]{1,64}$"))
+      and ((.value == null) or ((.value | type) == "number" and .value >= -1000000 and .value <= 1000000))))'
+readonly players_schema='type == "object" and length <= 20000
+  and all(to_entries[];
+    (.key | type) == "string" and (.key | test("^[A-Za-z0-9_.-]{1,32}$"))
+    and (.value | type) == "object" and (.value | length) <= 256
+    and (((.value.first_name // "") | type) == "string") and (((.value.first_name // "") | length) <= 100)
+    and (((.value.last_name // "") | type) == "string") and (((.value.last_name // "") | length) <= 100)
+    and (((.value.position // "") | type) == "string") and (((.value.position // "") | test("^[A-Z0-9_/-]{0,16}$")))
+    and (((.value.team // "") | type) == "string") and (((.value.team // "") | test("^[A-Z]{0,4}$"))))'
+readonly scoreboard_schema='type == "object" and (.events | type) == "array" and (.events | length) <= 128
+  and all(.events[];
+    type == "object"
+    and (.date | type) == "string" and (.date | length) <= 64
+    and ((try (.date | fromdateiso8601) catch null) != null)
+    and (.season | type) == "object"
+    and (.season.type | type) == "number" and .season.type == (.season.type | floor)
+    and (.season.type >= 0 and .season.type <= 4)
+    and (.season.year | type) == "number" and .season.year == (.season.year | floor)
+    and (.season.year >= 2000 and .season.year <= 2100)
+    and (.competitions | type) == "array" and (.competitions | length) <= 4
+    and all(.competitions[]; . as $competition |
+      ($competition | type) == "object"
+      and ($competition.competitors | type) == "array" and ($competition.competitors | length) <= 4
+      and ($competition.status | type) == "object"
+      and ($competition.status.period | type) == "number"
+      and $competition.status.period == ($competition.status.period | floor)
+      and ($competition.status.period >= 0 and $competition.status.period <= 20)
+      and ($competition.status.clock | type) == "number"
+      and ($competition.status.clock >= 0 and $competition.status.clock <= 3600)
+      and ($competition.status.displayClock | type) == "string" and ($competition.status.displayClock | length) <= 16
+      and ($competition.status.type.state | type) == "string"
+      and ($competition.status.type.state == "pre" or $competition.status.type.state == "in" or $competition.status.type.state == "post")
+      and all($competition.competitors[];
+        type == "object" and (.team | type) == "object"
+        and (.team.abbreviation | type) == "string"
+        and (.team.abbreviation | test("^[A-Z]{2,4}$")))))'
+
+if [[ "$week_arg" == auto ]]; then
+  cache_fetch nfl-state 300 "$api/state/nfl" "$MAX_STATE_BYTES" "$state_schema" || die "invalid week in Sleeper state"
+  state_file="$CACHE_FILE"
+  remote_week="$(jq -er '.display_week // .week | if type == "number" then tostring elif type == "string" then . else error("invalid week") end' "$state_file")" \
+    || die "invalid week in Sleeper state"
+  week="$(bounded_uint "$remote_week" 1 "$MAX_WEEK" week)"
+else
+  week="$week_arg"
 fi
 
 league_status=0
-league="$(cache_fetch "league-$league_id" 3600 "$api/league/$league_id" 44)" || league_status=$?
+cache_fetch "league-$league_id" 3600 "$api/league/$league_id" "$MAX_LEAGUE_BYTES" "$league_schema" 44 || league_status=$?
 if (( league_status == 44 )); then
   echo "League not found" >&2
   exit 44
 elif (( league_status != 0 )); then
-  exit "$league_status"
+  die "invalid league response"
 fi
-if ! jq -e 'type == "object" and (.league_id // "") != ""' <<<"$league" >/dev/null 2>&1; then
-  echo "League not found" >&2
-  exit 44
-fi
-users="$(cache_fetch "users-$league_id" 3600 "$api/league/$league_id/users")"
-rosters="$(cache_fetch "rosters-$league_id" 3600 "$api/league/$league_id/rosters")"
-matchups="$(curl "${curl_args[@]}" "$api/league/$league_id/matchups/$week")"
+league_file="$CACHE_FILE"
+[[ "$(jq -r '.league_id' "$league_file")" == "$league_id" ]] || die "league response ID does not match the requested league"
+season_raw="$(jq -er '.season | if type == "number" then tostring elif type == "string" then . else error("invalid season") end' "$league_file")" \
+  || die "invalid league season"
+season="$(bounded_uint "$season_raw" 2000 2100 season)"
 
-# Refresh weekly projections whenever matchup scores refresh. The panel polls
-# every minute during live games, so changing projected totals follow the same
-# cadence. Keep the last good response if Sleeper is temporarily unavailable.
-season="$(jq -r '.season' <<<"$league")"
-projections_file="$cache_dir/projections-$season-$week.json"
-projections_tmp="$projections_file.tmp"
-if curl "${curl_args[@]}" "$api/projections/nfl/regular/$season/$week" -o "$projections_tmp" 2>/dev/null \
-    && jq -e 'type == "object"' "$projections_tmp" >/dev/null 2>&1; then
-  mv "$projections_tmp" "$projections_file"
-else
-  rm -f "$projections_tmp"
-fi
-[[ -s "$projections_file" ]] || printf '[]' > "$projections_file"
+cache_fetch "users-$league_id" 3600 "$api/league/$league_id/users" "$MAX_USERS_BYTES" "$users_schema" \
+  || die "invalid league users response"
+users_file="$CACHE_FILE"
+cache_fetch "rosters-$league_id" 3600 "$api/league/$league_id/rosters" "$MAX_ROSTERS_BYTES" "$rosters_schema" \
+  || die "invalid league rosters response"
+rosters_file="$CACHE_FILE"
+download_json "$api/league/$league_id/matchups/$week" "$MAX_MATCHUPS_BYTES" "$matchups_schema" || die "invalid matchup response"
+matchups_file="$DOWNLOAD_FILE"
 
-history='[]'
+refresh_cache_or_default "projections-$season-$week" "$api/projections/nfl/regular/$season/$week" \
+  "$MAX_PROJECTIONS_BYTES" "$projections_schema" '{}'
+projections_file="$CACHE_FILE"
+
+history_files=()
 if (( week > 1 )); then
-  history_files=()
-  for (( previous_week=1; previous_week<week; previous_week++ )); do
-    cache_fetch "history-$league_id-$previous_week" 31536000 "$api/league/$league_id/matchups/$previous_week" >/dev/null
-    history_files+=("$cache_dir/history-$league_id-$previous_week.json")
+  first_history_week=$((week - MAX_HISTORY_WEEKS))
+  (( first_history_week < 1 )) && first_history_week=1
+  for (( previous_week=first_history_week; previous_week<week; previous_week++ )); do
+    cache_fetch "history-$league_id-$previous_week" 31536000 \
+      "$api/league/$league_id/matchups/$previous_week" "$MAX_MATCHUPS_BYTES" "$matchups_schema" \
+      || die "invalid matchup history response"
+    history_files+=("$CACHE_FILE")
   done
-  history="$(jq -s '.' "${history_files[@]}")"
 fi
+new_temp_file
+history_file="$TEMP_FILE"
+if (( ${#history_files[@]} > 0 )); then jq -s '.' "${history_files[@]}" > "$history_file"; else printf '[]\n' > "$history_file"; fi
+valid_json_file "$history_file" "$MAX_HISTORY_BYTES" \
+  'type == "array" and length <= 4 and all(.[]; type == "array" and length <= 64)' \
+  || die "bounded matchup history could not be built"
 
-# Sleeper owns all fantasy data. ESPN's scoreboard is used only as a small,
-# unauthenticated game-clock signal so the client can poll intelligently.
+# Sleeper owns all fantasy data. ESPN supplies only a bounded game-clock signal.
 date_from="$(date -u -d '4 days ago' +%Y%m%d)"
 date_to="$(date -u -d '4 days' +%Y%m%d)"
-scoreboard_file="$cache_dir/scoreboard.json"
-if ! curl "${curl_args[@]}" "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=$date_from-$date_to" -o "$scoreboard_file.tmp" 2>/dev/null; then
-  printf '{"events":[]}' > "$scoreboard_file.tmp"
-fi
-mv "$scoreboard_file.tmp" "$scoreboard_file"
+refresh_cache_or_default scoreboard \
+  "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=$date_from-$date_to" \
+  "$MAX_SCOREBOARD_BYTES" "$scoreboard_schema" '{"events":[]}'
+scoreboard_file="$CACHE_FILE"
 now_ms="$(( $(date +%s) * 1000 ))"
 sync_state="$(jq -r --argjson now "$now_ms" -f "$plugin_dir/lib/sync-state.jq" "$scoreboard_file" 2>/dev/null || printf idle)"
+[[ "$sync_state" == live || "$sync_state" == pregame || "$sync_state" == idle ]] || sync_state=idle
 
-players_file="$cache_dir/players.json"
-if [[ ! -s "$players_file" ]] || [[ -n "$(find "$players_file" -mtime +0 -print -quit 2>/dev/null)" ]]; then
-  tmp="$players_file.tmp"
-  curl "${curl_args[@]}" "$api/players/nfl" -o "$tmp"
-  mv "$tmp" "$players_file"
-fi
+cache_fetch players 86400 "$api/players/nfl" "$MAX_PLAYERS_BYTES" "$players_schema" \
+  || die "invalid NFL players response"
+players_file="$CACHE_FILE"
 
+new_temp_file
+output_file="$TEMP_FILE"
 jq -n \
-  --argjson league "$league" --argjson users "$users" \
-  --argjson rosters "$rosters" --argjson matchups "$matchups" \
-  --argjson history "$history" --slurpfile scoreboard "$scoreboard_file" \
-  --slurpfile players "$players_file" --slurpfile projections "$projections_file" \
-  --argjson week "$week" \
-  --arg sync_state "$sync_state" '
+  --slurpfile league_input "$league_file" --slurpfile users_input "$users_file" \
+  --slurpfile rosters_input "$rosters_file" --slurpfile matchups_input "$matchups_file" \
+  --slurpfile history_input "$history_file" --slurpfile scoreboard_input "$scoreboard_file" \
+  --slurpfile players_input "$players_file" --slurpfile projections_input "$projections_file" \
+  --argjson week "$week" --arg sync_state "$sync_state" \
+  --argjson max_teams "$MAX_TEAMS" --argjson max_starters "$MAX_STARTERS" --argjson max_bench "$MAX_BENCH" '
+  ($league_input[0]) as $league |
+  ($users_input[0][0:$max_teams]) as $users |
+  ($rosters_input[0][0:$max_teams]) as $rosters |
+  ($matchups_input[0][0:$max_teams]) as $matchups |
+  ($history_input[0][0:4]) as $history |
+  ($scoreboard_input[0]) as $scoreboard |
+  ($players_input[0]) as $players |
+  ($projections_input[0]) as $projections |
+  def short_text($value; $fallback; $limit):
+    if ($value | type) == "string" and ($value | length) > 0 then $value[0:$limit] else $fallback end;
   def teamname($rid):
-    ($rosters[] | select(.roster_id == $rid) | .owner_id) as $owner |
-    (($users[] | select(.user_id == $owner) | .metadata.team_name) //
-     ($users[] | select(.user_id == $owner) | .display_name) // ("Roster " + ($rid|tostring)));
-  def baseline($id): [$history[][]? | .players_points[$id] // empty] as $v |
-    {expected:(if ($v|length)>0 then ($v|add/length) else null end), samples:($v|length)};
+    ([$rosters[] | select(.roster_id == $rid) | .owner_id][0] // null) as $owner |
+    ([$users[] | select(.user_id == $owner) | .metadata.team_name][0] //
+      [$users[] | select(.user_id == $owner) | .display_name][0] // null) as $candidate |
+    short_text($candidate; "Roster " + ($rid | tostring); 80);
+  def baseline($id): [$history[][]? | .players_points[$id] // empty] as $values |
+    {expected:(if ($values | length) > 0 then ($values | add / length) else null end), samples:($values | length)};
   def projection($id):
-    ($projections[0] // {}) as $all_projections |
-    (if ($all_projections | type) == "object" then $all_projections[$id] else null end) as $stats |
+    ($projections[$id] // null) as $stats |
     if $stats == null then null
-    else reduce ($league.scoring_settings | to_entries[]) as $rule
-      (0; . + (($stats[$rule.key] // 0) * ($rule.value // 0)))
+    else (reduce ($league.scoring_settings | to_entries[]) as $rule
+      (0; . + (($stats[$rule.key] // 0) * $rule.value))) as $total |
+      (if $total > 1000000 then 1000000 elif $total < -1000000 then -1000000 else $total end)
     end;
   def game_status($team):
-    ([ $scoreboard[0].events[]? as $event |
-       select(($event.season.type // 0) == 2 and
-         (($event.season.year // 0) | tostring) == ($league.season | tostring)) |
-       $event.competitions[]? as $c |
-       $c.competitors[]? | select((.team.abbreviation // "") == $team or
-         ($team == "WAS" and .team.abbreviation == "WSH")) |
-       {state:$c.status.type.state, period:($c.status.period // 0), clock:($c.status.displayClock // ""),
-        progress:(if $c.status.type.state == "post" then 1
-          elif $c.status.type.state == "in" then
-            ([0, (((($c.status.period // 1)-1)*900 + (900-($c.status.clock // 900)))/3600), 1] | sort | .[1])
-          else 0 end)} ][0] // {state:"idle",period:0,clock:"",progress:0});
-  def player($id; $pts; $slot):
-    ($players[0][$id] // {}) as $p |
-    baseline($id) as $base |
-    {id:$id, slot:$slot,
-     name:(if $id == "0" then "Empty" elif ($id|test("^[A-Z]+$")) then ($id + " Defense")
-           else (([$p.first_name,$p.last_name] | map(select(. != null and . != "")) | join(" ")) // $id) end),
-     position:($p.position // (if ($id|test("^[A-Z]+$")) then "DEF" else "" end)),
-     nfl_team:($p.team // ""), points:($pts[$id] // 0), projected:projection($id), expected:$base.expected,
-     expected_samples:$base.samples, game_status:game_status($p.team // $id)};
-  [$league.roster_positions[] | select(. != "BN")] as $slots |
-  [$rosters[] | {roster_id, name:teamname(.roster_id)}] as $teams |
-  [$matchups[] | . as $m |
+    ([ $scoreboard.events[0:128][]? as $event |
+       select(($event.season.type // 0) == 2 and (($event.season.year // 0) | tostring) == ($league.season | tostring)) |
+       $event.competitions[0:4][]? as $competition |
+       $competition.competitors[0:4][]? |
+       select((.team.abbreviation // "") == $team or ($team == "WAS" and .team.abbreviation == "WSH")) |
+       {state:(if (["pre", "in", "post"] | index($competition.status.type.state)) then $competition.status.type.state else "idle" end),
+        period:([0, ($competition.status.period // 0), 10] | sort | .[1]),
+        clock:short_text(($competition.status.displayClock // ""); ""; 16),
+        progress:(if $competition.status.type.state == "post" then 1
+          elif $competition.status.type.state == "in" then
+            ([0, (((($competition.status.period // 1) - 1) * 900 + (900 - ($competition.status.clock // 900))) / 3600), 1] | sort | .[1])
+          else 0 end)} ][0] // {state:"idle", period:0, clock:"", progress:0});
+  def player($id; $points; $slot):
+    ($players[$id] // {}) as $player_data | baseline($id) as $base |
+    {id:$id, slot:short_text($slot; "BN"; 16),
+     name:(if $id == "0" then "Empty" elif ($id | test("^[A-Z]+$")) then ($id[0:8] + " Defense")
+           else short_text(([$player_data.first_name, $player_data.last_name] |
+             map(select(type == "string" and length > 0)) | join(" ")); $id[0:32]; 80) end),
+     position:short_text(($player_data.position // (if ($id | test("^[A-Z]+$")) then "DEF" else "" end)); ""; 16),
+     nfl_team:short_text(($player_data.team // ""); ""; 8), points:($points[$id] // 0),
+     projected:projection($id), expected:$base.expected, expected_samples:$base.samples,
+     game_status:game_status(($player_data.team // $id)[0:8])};
+  [$league.roster_positions[0:$max_starters][] | select(. != "BN")] as $slots |
+  [$rosters[0:$max_teams][] | {roster_id, name:teamname(.roster_id)}] as $teams |
+  [$matchups[0:$max_teams][] |
     {roster_id, matchup_id, points:(.custom_points // .points // 0),
-     starters:[range(0; (.starters|length)) as $i | player(.starters[$i]; (.players_points // {}); ($slots[$i] // "START"))],
-     bench:[(.players - .starters)[]? as $id | player($id; (.players_points // {}); "BN")]}] as $games |
-  {league_id:$league.league_id, league_name:$league.name, season:$league.season, week:$week,
-   teams:$teams, games:$games, sync_state:$sync_state,
-   next_refresh_seconds:(if $sync_state == "live" then 60 elif $sync_state == "pregame" then 300 else 900 end)}'
+     starters:[range(0; ([((.starters // []) | length), $max_starters] | min)) as $index |
+       player(.starters[$index]; (.players_points // {}); ($slots[$index] // "START"))],
+     bench:[(((.players // [])[0:64] - ((.starters // [])[0:$max_starters]))[0:$max_bench])[]? as $id |
+       player($id; (.players_points // {}); "BN")]}] as $games |
+  {league_id:$league.league_id, league_name:short_text($league.name; "Sleeper League"; 100),
+   season:($league.season | tostring), week:$week, teams:$teams, games:$games,
+   sync_state:$sync_state,
+   next_refresh_seconds:(if $sync_state == "live" then 60 elif $sync_state == "pregame" then 300 else 900 end)}
+' > "$output_file"
+
+readonly output_schema='type == "object"
+  and (.league_id | type) == "string" and (.league_id | test("^[0-9]{10,24}$"))
+  and (.week | type) == "number" and (.week >= 1 and .week <= 18)
+  and (.teams | type) == "array" and (.teams | length) <= 64
+  and (.games | type) == "array" and (.games | length) <= 64
+  and all(.games[];
+    (.starters | type) == "array" and (.starters | length) <= 32
+    and (.bench | type) == "array" and (.bench | length) <= 32)'
+valid_json_file "$output_file" "$MAX_OUTPUT_BYTES" "$output_schema" || die "bounded matchup output validation failed"
+cat -- "$output_file"
