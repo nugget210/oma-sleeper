@@ -1,4 +1,4 @@
-# Omarchy Sleeper Matchup
+# Omarchy Sleeper Fantasy Matchup Plugin
 
 A theme-aware Omarchy bar widget for live Sleeper fantasy football matchups.
 
