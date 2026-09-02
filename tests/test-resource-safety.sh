@@ -40,6 +40,13 @@ done
 
 printf '%s\t%s\t%s\n' "$url" "$output" "$max_bytes" >> "${CURL_LOG:?}"
 
+if [[ "${FAKE_MODE:-normal}" == stall_tree ]]; then
+  trap '' TERM
+  sleep 300 &
+  printf '%s %s\n' "$$" "$!" > "${STALL_PID_FILE:?}"
+  wait
+fi
+
 if [[ "${FAKE_MODE:-normal}" == replace_parent && ! -e "${CACHE_SWAP_ROOT:?}/parent-swapped" ]]; then
   touch "$CACHE_SWAP_ROOT/parent-swapped"
   mv "$XDG_CACHE_HOME/oma-sleeper" "$CACHE_SWAP_ROOT/original-cache"
@@ -146,7 +153,22 @@ directory_link_cache="$test_root/directory-link-cache"
 mkdir -p "$directory_link_cache" "$test_root/linked-cache-target"
 ln -s "$test_root/linked-cache-target" "$directory_link_cache/oma-sleeper"
 run_failing_case normal "$directory_link_cache" 1234567890123456789 1 normal
-grep -q 'cache directory must not be a symlink' "$test_root/error"
+grep -q 'symbolic link' "$test_root/error"
+
+ancestor_link_target="$test_root/ancestor-link-target"
+mkdir -p "$ancestor_link_target/nested" "$test_root/ancestor-link-parent"
+ln -s "$ancestor_link_target" "$test_root/ancestor-link-parent/cache-link"
+run_failing_case normal "$test_root/ancestor-link-parent/cache-link/nested" 1234567890123456789 1 normal
+[[ ! -e "$ancestor_link_target/nested/oma-sleeper" ]]
+grep -q 'symbolic link' "$test_root/error"
+
+writable_ancestor="$test_root/writable-ancestor"
+mkdir -p "$writable_ancestor/cache"
+chmod 0777 "$writable_ancestor"
+run_failing_case normal "$writable_ancestor/cache" 1234567890123456789 1 normal
+[[ ! -e "$writable_ancestor/cache/oma-sleeper" ]]
+grep -q 'unsafe writable cache ancestor' "$test_root/error"
+chmod 0700 "$writable_ancestor"
 
 normal_cache="$test_root/normal-cache"
 mkdir -p "$normal_cache"
@@ -188,5 +210,22 @@ FAKE_MODE=replace_leaf CURL_LOG="$test_root/curl.log" CACHE_SWAP_ROOT="$test_roo
   "$repo_dir/bin/sleeper-matchup" 1234567890123456789 1 normal > "$test_root/leaf-output"
 jq -e '.league_name == "League" and .week == 1' "$test_root/leaf-output" >/dev/null
 jq -e '.name == "<b>Replaced</b>"' "$normal_cache/oma-sleeper/league-1234567890123456789.json" >/dev/null
+
+deadline_cache="$test_root/deadline-cache"
+mkdir -p "$deadline_cache"
+: > "$test_root/curl.log"
+set +e
+FAKE_MODE=stall_tree CURL_LOG="$test_root/curl.log" STALL_PID_FILE="$test_root/stall-pids" \
+  OMA_SLEEPER_DEADLINE_SECONDS=1 PATH="$test_root/bin:$PATH" XDG_CACHE_HOME="$deadline_cache" \
+  "$repo_dir/bin/sleeper-matchup" 1234567890123456789 1 force \
+  > "$test_root/deadline-output" 2> "$test_root/deadline-error"
+deadline_status=$?
+set -e
+[[ "$deadline_status" -eq 124 ]]
+grep -q 'refresh exceeded 1 seconds' "$test_root/deadline-error"
+read -r stalled_shell stalled_child < "$test_root/stall-pids"
+! kill -0 "$stalled_shell" 2>/dev/null
+! kill -0 "$stalled_child" 2>/dev/null
+[[ -z "$(find "$deadline_cache/oma-sleeper" -maxdepth 1 -name '.oma-sleeper.session.*' -print -quit)" ]]
 
 echo "Resource-safety tests passed"

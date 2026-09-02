@@ -10,6 +10,7 @@ required_files=(
   TeamColumn.qml
   manifest.json
   bin/sleeper-matchup
+  lib/secure-helper.py
   lib/sync-state.jq
   tests/test-qml-safety.sh
   tests/test-resource-safety.sh
@@ -27,6 +28,7 @@ grep -q 'setting("rosterId", 0)' "$repo_dir/Panel.qml"
 grep -q 'setting("shortName", "")' "$repo_dir/Panel.qml"
 grep -q '`curl`' "$repo_dir/README.md"
 grep -q '`jq`' "$repo_dir/README.md"
+grep -q 'Python 3' "$repo_dir/README.md"
 grep -q 'manual setup' "$repo_dir/README.md"
 
 echo "Plugin layout test passed"

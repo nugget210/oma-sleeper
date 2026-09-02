@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${OMA_SLEEPER_WORKER:-}" != 1 ]]; then
+  entry_dir="${BASH_SOURCE[0]%/*}"
+  [[ "$entry_dir" != "${BASH_SOURCE[0]}" ]] || entry_dir=.
+  exec python3 "$entry_dir/../lib/secure-helper.py" --supervise "${BASH_SOURCE[0]}" "$@"
+fi
+
 readonly MAX_WEEK=18 MAX_HISTORY_WEEKS=4 MAX_TEAMS=64 MAX_STARTERS=32 MAX_BENCH=32
 readonly MAX_STATE_BYTES=$((64 * 1024)) MAX_LEAGUE_BYTES=$((512 * 1024))
 readonly MAX_USERS_BYTES=$((2 * 1024 * 1024)) MAX_ROSTERS_BYTES=$((2 * 1024 * 1024))
@@ -30,19 +36,14 @@ fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 plugin_dir="$(dirname -- "$script_dir")"
-cache_root="${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}"
-cache_dir="$cache_root/oma-sleeper"
 umask 077
 
-[[ ! -L "$cache_dir" ]] || die "cache directory must not be a symlink"
-[[ ! -e "$cache_dir" || -d "$cache_dir" ]] || die "cache path is not a directory"
-mkdir -p -- "$cache_dir"
-chmod 0700 -- "$cache_dir"
-cache_dir="$(cd -P -- "$cache_dir" && pwd)"
-[[ "$(stat -c %u -- "$cache_dir")" == "$(id -u)" ]] || die "cache directory is not owned by the current user"
-exec {cache_fd}< "$cache_dir"
+cache_fd="${OMA_SLEEPER_CACHE_FD:-}"
+[[ "$cache_fd" =~ ^[0-9]+$ ]] || die "secure cache descriptor is missing"
 cache_anchor="/proc/self/fd/$cache_fd"
+[[ -d "$cache_anchor" ]] || die "secure cache descriptor is not a directory"
 [[ "$(stat -Lc %u -- "$cache_anchor")" == "$(id -u)" ]] || die "opened cache directory ownership changed"
+[[ "$(stat -Lc %a -- "$cache_anchor")" == 700 ]] || die "opened cache directory permissions changed"
 session_dir="$(mktemp -d --tmpdir="$cache_anchor" .oma-sleeper.session.XXXXXXXX)"
 chmod 0700 -- "$session_dir"
 

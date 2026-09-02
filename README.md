@@ -15,12 +15,13 @@ The compact menubar view keeps the current matchup visible at a glance:
 ## Requirements
 
 - Omarchy 4.x with `omarchy-shell`
+- Python 3
 - `curl`
 - `jq`
 - A public Sleeper fantasy football league
 
 Sleeper's read-only league API does not require authentication.
-Because `curl` and `jq` are external system dependencies, the marketplace may classify the plugin as requiring manual setup until they are installed.
+Because `curl` and `jq` are external system dependencies, the marketplace may classify the plugin as requiring manual setup until they are installed. Python 3 supplies the local cache and process-safety supervisor.
 
 ## Install
 
@@ -70,7 +71,9 @@ Sleeper remains the source of all fantasy data. The public ESPN NFL scoreboard s
 
 ## Resource safety
 
-All remote responses have endpoint-specific download and collection limits and must pass a JSON schema check before use. League IDs, NFL weeks, seasons, roster IDs, player IDs, names, and score collections are type-checked and bounded. The cache directory is opened once and all writes remain anchored to that directory descriptor. Cached inputs are hard-linked into a private per-run directory so validation and later processing use the same inode; validated downloads are atomically renamed from unique temporary files. Cache directories are owner-only.
+All remote responses have endpoint-specific download and collection limits and must pass a JSON schema check before use. League IDs, NFL weeks, seasons, roster IDs, player IDs, names, and score collections are type-checked and bounded. Every cache path component is opened as a directory without following symbolic links, then checked for safe ownership and permissions. The final directory is pinned before its permissions change or any cache operation begins, and all writes remain anchored to that descriptor. Cached inputs are hard-linked into a private per-run directory so validation and later processing use the same inode; validated downloads are atomically renamed from unique temporary files. Cache directories are owner-only.
+
+The complete refresh has a 90-second wall-clock deadline covering cache setup, downloads, JSON validation, reduction, and output generation. On expiry, its isolated process group receives `TERM`, then `KILL` after a short grace period, and all adopted child processes are reaped so the panel cannot remain in a loading state indefinitely.
 
 The generated QML payload is capped at 2 MiB and the interface renders at most 64 teams, 32 starters, and 32 bench players per team. Remote and user-provided strings are rendered explicitly as plain text. Optional home/opponent labels have a 24-character limit at both input and persistence boundaries, with control characters removed before they enter `shell.json`.
 

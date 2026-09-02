@@ -234,6 +234,9 @@ Panel {
       if (code === 44) {
         root.settingsMessage = ""
         root.errorText = "League not found — check the URL, ID, or current season"
+      } else if (code === 124) {
+        root.settingsMessage = ""
+        root.errorText = "Refresh timed out — check your connection and try again"
       } else if (code !== 0) {
         root.settingsMessage = ""
         root.errorText = "Sleeper is unavailable — check your connection and try again"
