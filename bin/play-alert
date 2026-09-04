@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Plays one of the bundled alert tones for the score-alert setting. Exits
+# quietly and successfully whenever the sound cannot be played, so a host
+# without an audio player never surfaces the alert as a plugin failure.
+
+requested="${1:-}"
+[[ -n "$requested" ]] || exit 0
+
+# Resolve physically (-P), so the confinement check below still matches when the
+# plugin is installed as a symlink to a working tree elsewhere.
+script_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+sounds_dir="$(cd -P -- "$script_dir/../assets/sounds" && pwd -P)" || exit 0
+
+# Confine playback to the plugin's own bundled tones so this helper can never
+# be used to play an arbitrary file from elsewhere on the system.
+resolved="$(readlink -f -- "$requested")" || exit 0
+[[ "$resolved" == "$sounds_dir"/*.wav ]] || exit 0
+[[ -f "$resolved" && -r "$resolved" ]] || exit 0
+
+for player in pw-play paplay aplay ffplay; do
+  command -v "$player" >/dev/null 2>&1 || continue
+  case "$player" in
+    ffplay) exec "$player" -nodisp -autoexit -loglevel quiet "$resolved" ;;
+    aplay) exec "$player" -q -- "$resolved" ;;
+    *) exec "$player" -- "$resolved" ;;
+  esac
+done
+
+exit 0

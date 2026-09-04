@@ -19,6 +19,11 @@ Panel {
   property bool loading: false
   property string settingsMessage: ""
   property bool forceMetadataRefresh: false
+  property string pendingFetchLeagueId: ""
+  property var scoreSnapshot: ({})
+  property bool scoreWatchReady: false
+  property double leadMargin: 0
+  property bool leadWatchReady: false
   property double lastHeartbeatMs: Date.now()
   readonly property int maxTeams: 64
   readonly property int maxPlayersPerSection: 32
@@ -30,6 +35,9 @@ Panel {
   readonly property string opponentLabel: boundedLabel(setting("opponentName", ""))
   readonly property string colorMode: String(setting("colorMode", "theme"))
   readonly property string playerDisplayMode: String(setting("playerDisplayMode", "full"))
+  readonly property string scoreSound: soundChoice(setting("scoreSound", "ding"))
+  readonly property bool leadAlert: setting("leadAlert", true) === true
+  readonly property bool notifyAlerts: setting("notifyAlerts", true) === true
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 2), 10) || 2) // retained for settings compatibility
   readonly property string syncState: data && data.sync_state ? String(data.sync_state) : "idle"
   readonly property int adaptiveIntervalMs: data && Number(data.next_refresh_seconds) > 0 ? Number(data.next_refresh_seconds) * 1000 : 900000
@@ -53,7 +61,142 @@ Panel {
     (Number(myGame.points) > Number(opponentGame.points) ? positiveColor :
      (Number(myGame.points) < Number(opponentGame.points) ? negativeColor : (bar ? bar.foreground : Color.foreground)))
 
+  onLeagueIdChanged: resetAlertWatch()
+  onSelectedRosterIdChanged: resetAlertWatch()
+
   function score(value) { return Number(value || 0).toFixed(1) }
+  function soundChoice(value) {
+    var name = String(value || "")
+    return name === "off" || name === "ding" || name === "chime" || name === "blip" ? name : "ding"
+  }
+  function pluginFile(relativePath) {
+    return decodeURIComponent(Qt.resolvedUrl(relativePath).toString()).replace("file://", "")
+  }
+  function starterPoints(game) {
+    var snapshot = {}
+    if (!game || !Array.isArray(game.starters)) return snapshot
+    for (var i = 0; i < game.starters.length; i++) {
+      var player = game.starters[i]
+      // Key by slot and player so empty slots cannot collide, and a lineup
+      // change simply drops the old baseline instead of reading as a score.
+      if (player)
+        snapshot[String(i) + ":" + String(player.id || player.name || "")] =
+          {points:Number(player.points || 0), name:root.boundedLabel(player.name)}
+    }
+    return snapshot
+  }
+  // Only the first widget for this module alerts, so a multi-monitor bar raises
+  // one alert per event rather than one per screen.
+  function isAlertingPanel() {
+    if (!root.hostWidget || typeof root.hostWidget.siblingWidgets !== "function") return true
+    var widgets = root.hostWidget.siblingWidgets()
+    return !widgets || widgets.length === 0 || widgets[0] === root.hostWidget
+  }
+  function resetAlertWatch() {
+    root.scoreSnapshot = ({})
+    root.scoreWatchReady = false
+    root.leadMargin = 0
+    root.leadWatchReady = false
+  }
+  function gameInResult(result, rosterId) {
+    if (!result || !Array.isArray(result.games)) return null
+    for (var i = 0; i < result.games.length; i++)
+      if (result.games[i] && result.games[i].roster_id === rosterId) return result.games[i]
+    return null
+  }
+  function opponentInResult(result, game) {
+    if (!game || !result || !Array.isArray(result.games)) return null
+    for (var i = 0; i < result.games.length; i++)
+      if (result.games[i] && result.games[i].matchup_id === game.matchup_id
+          && result.games[i].roster_id !== game.roster_id) return result.games[i]
+    return null
+  }
+  // Starters whose points rose since the previous refresh. A slot with no prior
+  // baseline (first refresh, or a lineup change) is skipped rather than counted.
+  function scoringPlays(snapshot) {
+    var plays = []
+    if (!root.scoreWatchReady) return plays
+    for (var key in snapshot) {
+      var previous = root.scoreSnapshot[key]
+      if (previous === undefined) continue
+      var gain = snapshot[key].points - previous.points
+      if (gain > 0.01) plays.push({name:snapshot[key].name, gain:gain})
+    }
+    return plays
+  }
+  // A lead change is the margin crossing zero. The epsilon keeps floating-point
+  // noise from registering, and a tie counts as neutral ground to cross.
+  function leadChange(margin) {
+    if (!root.leadWatchReady) return ""
+    if (root.leadMargin < 0.005 && margin > 0.005) return "gained"
+    if (root.leadMargin > -0.005 && margin < -0.005) return "lost"
+    return ""
+  }
+  function playSummary(plays) {
+    if (plays.length === 1) return plays[0].name + " +" + root.score(plays[0].gain)
+    var total = 0
+    for (var i = 0; i < plays.length; i++) total += plays[i].gain
+    return plays.length + " scoring plays +" + root.score(total)
+  }
+  function scoreLine(mine, theirs) {
+    return (root.shortName || "MY") + " " + root.score(mine) + " – " + root.score(theirs) + " " + root.opponentShort
+  }
+  // Compare this refresh against the previous one and alert on scoring plays and
+  // lead changes. The first refresh only seeds the baseline, so opening the panel
+  // never alerts for points already on the board.
+  function reviewScoring(result) {
+    var game = root.gameInResult(result, root.selectedRosterId)
+    var opponent = root.opponentInResult(result, game)
+    var snapshot = root.starterPoints(game)
+    var plays = root.scoringPlays(snapshot)
+    var mine = game ? Number(game.points || 0) : 0
+    var theirs = opponent ? Number(opponent.points || 0) : 0
+    var margin = mine - theirs
+    var flip = game && opponent ? root.leadChange(margin) : ""
+
+    root.scoreSnapshot = snapshot
+    root.scoreWatchReady = true
+    if (game && opponent) {
+      root.leadMargin = margin
+      root.leadWatchReady = true
+    }
+    if (!root.isAlertingPanel()) return
+
+    // A lead change is the more significant event, so it takes the tone when
+    // both happen on the same refresh; the notifications still report both.
+    if (flip !== "" && root.leadAlert) root.playSound(flip === "gained" ? "lead-up" : "lead-down")
+    else if (plays.length > 0) root.playAlert(root.scoreSound)
+
+    if (!root.notifyAlerts) return
+    // One notification per refresh, so a scoring play that also flips the lead
+    // reads as a single event rather than two stacked popups.
+    var line = root.scoreLine(mine, theirs)
+    var scored = plays.length > 0 ? root.playSummary(plays) : ""
+    if (flip !== "" && root.leadAlert)
+      root.notify(flip === "gained" ? "Took the lead" : "Lost the lead",
+                  scored === "" ? line : scored + " · " + line)
+    else if (scored !== "") root.notify(scored, line)
+  }
+  function notify(summary, body) {
+    if (notifyProc.running) return
+    notifyProc.summary = String(summary || "")
+    notifyProc.body = String(body || "")
+    notifyProc.running = true
+  }
+  function soundFile(name) {
+    var known = ["ding", "chime", "blip", "lead-up", "lead-down"]
+    return known.indexOf(String(name || "")) < 0 ? "" : root.pluginFile("assets/sounds/" + name + ".wav")
+  }
+  function playSound(name) {
+    var file = root.soundFile(name)
+    if (file === "" || alertProc.running) return
+    alertProc.soundPath = file
+    alertProc.running = true
+  }
+  function playAlert(name) {
+    var sound = root.soundChoice(name)
+    if (sound !== "off") root.playSound(sound)
+  }
   function boundedLabel(value) {
     return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, root.maxLabelLength)
   }
@@ -144,26 +287,55 @@ Panel {
     if (leagueId === "") return
     if (fetchProc.running) return
     forceMetadataRefresh = forceMetadata === true
+    pendingFetchLeagueId = leagueId
     loading = true; errorText = ""
     fetchProc.running = true
   }
   function open() { if (leagueId === "") settingsOpen = true; controller.show(); refresh(false) }
   function close() { settingsOpen = false; controller.hide() }
-  function saveEntry(leagueId, rosterId, label, mode, displayMode, opponentName) {
-    var entry = {id:root.moduleName, leagueId:leagueId, rosterId:rosterId,
-                 shortName:root.boundedLabel(label), refreshMinutes:root.refreshMinutes,
-                 colorMode:mode || root.colorMode,
-                 playerDisplayMode:displayMode || root.playerDisplayMode,
-                 opponentName:root.boundedLabel(opponentName)}
+  // Persist the settings entry. Every value is read from live panel state, and
+  // `changes` overrides only the keys a caller is actually changing, so adding a
+  // setting never means threading another argument through every call site.
+  // Validation is applied after the merge, so an override cannot bypass it.
+  function saveEntry(changes) {
+    var entry = {id:root.moduleName,
+                 leagueId:root.leagueId,
+                 rosterId:root.selectedRosterId,
+                 shortName:labelField.text,
+                 refreshMinutes:root.refreshMinutes,
+                 colorMode:root.colorMode,
+                 playerDisplayMode:root.playerDisplayMode,
+                 opponentName:opponentField.text,
+                 scoreSound:root.scoreSound,
+                 leadAlert:root.leadAlert,
+                 notifyAlerts:root.notifyAlerts}
+    var overrides = changes || {}
+    for (var key in overrides)
+      if (entry.hasOwnProperty(key)) entry[key] = overrides[key]
+    entry.shortName = root.boundedLabel(entry.shortName)
+    entry.opponentName = root.boundedLabel(entry.opponentName)
+    entry.scoreSound = root.soundChoice(entry.scoreSound)
+    entry.leadAlert = entry.leadAlert === true
+    entry.notifyAlerts = entry.notifyAlerts === true
     if (root.hostWidget && typeof root.hostWidget.publishSettings === "function")
       root.hostWidget.publishSettings(entry)
     else root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
-  function persist(rosterId, label) { saveEntry(root.leagueId, rosterId, label, root.colorMode, root.playerDisplayMode, opponentField.text.trim()) }
-  function setColorMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), mode, root.playerDisplayMode, opponentField.text.trim()) }
-  function setPlayerDisplayMode(mode) { saveEntry(root.leagueId, root.selectedRosterId, labelField.text.trim(), root.colorMode, mode, opponentField.text.trim()) }
+  function persist(rosterId) { saveEntry({rosterId:rosterId}) }
+  function setColorMode(mode) { saveEntry({colorMode:mode}) }
+  function setPlayerDisplayMode(mode) { saveEntry({playerDisplayMode:mode}) }
+  function setLeadAlert(enabled) {
+    saveEntry({leadAlert:enabled === true})
+    if (enabled === true) root.playSound("lead-up")
+  }
+  function setNotifyAlerts(enabled) { saveEntry({notifyAlerts:enabled === true}) }
+  // Preview the choice as it is made, so the sounds can be compared by ear.
+  function setScoreSound(sound) {
+    saveEntry({scoreSound:sound})
+    root.playAlert(sound)
+  }
   function leagueIdFromInput(value) {
     var text = String(value || "").trim()
     if (/^\d{10,24}$/.test(text)) return text
@@ -202,7 +374,7 @@ Panel {
     errorText = ""
     settingsMessage = "Syncing league…"
     data = null
-    saveEntry(id, 0, labelField.text.trim(), root.colorMode, root.playerDisplayMode, opponentField.text.trim())
+    saveEntry({leagueId:id, rosterId:0})
     Qt.callLater(function() { refresh(true) })
   }
   function openSleeper() {
@@ -212,7 +384,7 @@ Panel {
 
   Process {
     id: fetchProc
-    command: [Qt.resolvedUrl("bin/sleeper-matchup").toString().replace("file://", ""), root.leagueId, "auto", root.forceMetadataRefresh ? "force" : "normal"]
+    command: [root.pluginFile("bin/sleeper-matchup"), root.leagueId, "auto", root.forceMetadataRefresh ? "force" : "normal"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -222,15 +394,25 @@ Panel {
           var result = root.boundedResult(JSON.parse(payload))
           if (root.hostWidget && typeof root.hostWidget.publishData === "function") root.hostWidget.publishData(result)
           else root.data = result
+          root.reviewScoring(result)
           root.errorText = ""
           if (root.settingsOpen) root.settingsMessage = "League synced — choose your fantasy team"
         }
-        catch(e) { root.errorText = "Could not read matchup data" }
+        catch(e) {
+          console.warn("Sleeper matchup: discarding fetch result -", e.message)
+          if (e.message !== "Mismatched league ID") root.errorText = "Could not read matchup data"
+        }
       }
     }
     onExited: function(code) {
       root.loading = false
       root.forceMetadataRefresh = false
+      // A response for a league we've since navigated away from is stale either way
+      // (success or failure) — drop it and refetch for whichever league is current now.
+      if (root.leagueId === "" || root.leagueId !== root.pendingFetchLeagueId) {
+        if (root.leagueId !== "") root.refresh(true)
+        return
+      }
       if (code === 44) {
         root.settingsMessage = ""
         root.errorText = "League not found — check the URL, ID, or current season"
@@ -242,6 +424,17 @@ Panel {
         root.errorText = "Sleeper is unavailable — check your connection and try again"
       }
     }
+  }
+  Process {
+    id: alertProc
+    property string soundPath: ""
+    command: [root.pluginFile("bin/play-alert"), soundPath]
+  }
+  Process {
+    id: notifyProc
+    property string summary: ""
+    property string body: ""
+    command: [root.pluginFile("bin/notify-alert"), summary, body]
   }
   Timer {
     id: refreshTimer
@@ -379,6 +572,69 @@ Panel {
               text: root.playerDisplayMode === "scores" ? "Plain names and scores, with progress rails, pace colours, and symbols hidden." : (root.playerDisplayMode === "progress" ? "Shows neutral live clocks and game-progress rails without pace styling." : (root.playerDisplayMode === "pace" ? "Shows pace colours and symbols without live clocks or progress rails." : "Shows live game progress and pace indicators together."))
               color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
             }
+            Text { text: "Score alert"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+            Row {
+              spacing: Style.space(8)
+              Repeater {
+                model: [{id:"off",label:"Off"},{id:"ding",label:"Ding"},{id:"chime",label:"Chime"},{id:"blip",label:"Blip"}]
+                Rectangle {
+                  required property var modelData
+                  width: soundLabel.implicitWidth + Style.space(24); height: Style.space(32); radius: Style.cornerRadius
+                  color: modelData.id === root.scoreSound ? Style.selectedFillFor(root.bar.foreground, Color.accent) : (soundArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent")
+                  border.width: 1
+                  border.color: modelData.id === root.scoreSound ? Color.accent : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.18)
+                  Text { id: soundLabel; anchors.centerIn: parent; text: modelData.label; textFormat: Text.PlainText; color: modelData.id === root.scoreSound ? Style.selectedStateColor(root.bar.foreground,Color.accent) : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  MouseArea { id: soundArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.setScoreSound(modelData.id) }
+                }
+              }
+            }
+            Text {
+              width: parent.width; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+              text: root.scoreSound === "off" ? "Scoring plays are silent." : "Plays a short tone when one of your starters gains points."
+              color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+            }
+            Text { text: "Lead change alert"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+            Row {
+              spacing: Style.space(8)
+              Repeater {
+                model: [{on:false,label:"Off"},{on:true,label:"On"}]
+                Rectangle {
+                  required property var modelData
+                  width: leadLabel.implicitWidth + Style.space(24); height: Style.space(32); radius: Style.cornerRadius
+                  color: modelData.on === root.leadAlert ? Style.selectedFillFor(root.bar.foreground, Color.accent) : (leadArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent")
+                  border.width: 1
+                  border.color: modelData.on === root.leadAlert ? Color.accent : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.18)
+                  Text { id: leadLabel; anchors.centerIn: parent; text: modelData.label; textFormat: Text.PlainText; color: modelData.on === root.leadAlert ? Style.selectedStateColor(root.bar.foreground,Color.accent) : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  MouseArea { id: leadArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.setLeadAlert(modelData.on) }
+                }
+              }
+            }
+            Text {
+              width: parent.width; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+              text: "A rising three-note tone when you take the lead, falling when you lose it. Distinct from the scoring tone."
+              color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+            }
+            Text { text: "Desktop notifications"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+            Row {
+              spacing: Style.space(8)
+              Repeater {
+                model: [{on:false,label:"Off"},{on:true,label:"On"}]
+                Rectangle {
+                  required property var modelData
+                  width: notifyLabel.implicitWidth + Style.space(24); height: Style.space(32); radius: Style.cornerRadius
+                  color: modelData.on === root.notifyAlerts ? Style.selectedFillFor(root.bar.foreground, Color.accent) : (notifyArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent")
+                  border.width: 1
+                  border.color: modelData.on === root.notifyAlerts ? Color.accent : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.18)
+                  Text { id: notifyLabel; anchors.centerIn: parent; text: modelData.label; textFormat: Text.PlainText; color: modelData.on === root.notifyAlerts ? Style.selectedStateColor(root.bar.foreground,Color.accent) : root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  MouseArea { id: notifyArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.setNotifyAlerts(modelData.on) }
+                }
+              }
+            }
+            Text {
+              width: parent.width; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+              text: "Names the scorer and the points gained, so you can read the play without opening the panel."
+              color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+            }
             Text { text: "Fantasy team"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
             Column {
               width: parent.width
@@ -389,14 +645,14 @@ Panel {
                   width: parent.width; height: Style.space(34); radius: Style.cornerRadius
                   color: modelData.roster_id === root.selectedRosterId ? Style.hoverFillFor(root.bar.foreground, Color.accent) : (teamArea.containsMouse ? Qt.rgba(1,1,1,.04) : "transparent")
                   Text { anchors.left: parent.left; anchors.leftMargin: Style.space(10); anchors.verticalCenter: parent.verticalCenter; text: (modelData.roster_id === root.selectedRosterId ? "●  " : "○  ") + modelData.name; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
-                  MouseArea { id: teamArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.persist(modelData.roster_id, labelField.text.trim()) }
+                  MouseArea { id: teamArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.persist(modelData.roster_id) }
                 }
               }
             }
             Rectangle {
               width: Style.space(90); height: Style.space(32); radius: Style.cornerRadius; color: saveArea.containsMouse ? Color.accent : Style.hoverFillFor(root.bar.foreground, Color.accent)
               Text { anchors.centerIn: parent; text: "Save"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
-              MouseArea { id: saveArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.persist(root.selectedRosterId,labelField.text.trim()); root.settingsOpen=false } }
+              MouseArea { id: saveArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.persist(root.selectedRosterId); root.settingsOpen=false } }
             }
           }
 

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Raises one desktop notification for a scoring play or lead change. Exits
+# quietly and successfully when the host has no notification tool, so the alert
+# never surfaces as a plugin failure.
+
+command -v notify-send >/dev/null 2>&1 || exit 0
+
+summary="${1:-}"
+body="${2:-}"
+[[ -n "$summary" ]] || exit 0
+
+# The text is built from remote player and team names, so strip control
+# characters and bound the length before it reaches the notification daemon.
+clean() {
+  local text="${1//[$'\x00'-$'\x1f'$'\x7f']/ }"
+  printf '%.160s' "$text"
+}
+
+summary="$(clean "$summary")"
+body="$(clean "$body")"
+
+# "--" keeps a name that begins with a dash from being read as an option.
+notify-send --app-name="Sleeper Matchup" --expire-time=6000 \
+  --icon=applications-games -- "$summary" "$body" >/dev/null 2>&1 || exit 0

@@ -10,8 +10,18 @@ required_files=(
   TeamColumn.qml
   manifest.json
   bin/sleeper-matchup
+  bin/play-alert
+  bin/notify-alert
   lib/secure-helper.py
   lib/sync-state.jq
+  assets/sounds/ding.wav
+  assets/sounds/chime.wav
+  assets/sounds/blip.wav
+  assets/sounds/lead-up.wav
+  assets/sounds/lead-down.wav
+  assets/sounds/generate-sounds.py
+  tests/alert-logic.js
+  tests/test-alert-logic.sh
   tests/test-qml-safety.sh
   tests/test-resource-safety.sh
 )
@@ -21,6 +31,11 @@ for file in "${required_files[@]}"; do
 done
 
 test -x "$repo_dir/bin/sleeper-matchup"
+test -x "$repo_dir/bin/play-alert"
+test -x "$repo_dir/bin/notify-alert"
+grep -q 'setting("scoreSound", "ding")' "$repo_dir/Panel.qml"
+grep -q 'setting("leadAlert", true)' "$repo_dir/Panel.qml"
+grep -q 'setting("notifyAlerts", true)' "$repo_dir/Panel.qml"
 test ! -e "$repo_dir/install.sh"
 jq -e '.id == "nugget210.oma-sleeper" and .entryPoints.barWidget == "BarWidget.qml"' "$repo_dir/manifest.json" >/dev/null
 grep -q 'setting("leagueId", "")' "$repo_dir/Panel.qml"
