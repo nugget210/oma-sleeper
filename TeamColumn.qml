@@ -11,6 +11,7 @@ Column {
   property var bar: null
   property string colorMode: "theme"
   property string playerDisplayMode: "full"
+  signal playerActivated(var player)
   readonly property bool plainScores: playerDisplayMode === "scores"
   readonly property bool hasScore: teamScore > 0 || opponentScore > 0
   readonly property bool leading: hasScore && teamScore > opponentScore
@@ -38,7 +39,7 @@ Column {
     }
   }
   Text { text: "STARTERS"; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
-  Repeater { model: root.game ? root.game.starters : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode } }
+  Repeater { model: root.game ? root.game.starters : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode; onActivated: root.playerActivated(modelData) } }
   Text { text: "BENCH"; textFormat: Text.PlainText; topPadding: Style.space(8); color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
-  Repeater { model: root.game ? root.game.bench : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode } }
+  Repeater { model: root.game ? root.game.bench : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode; onActivated: root.playerActivated(modelData) } }
 }

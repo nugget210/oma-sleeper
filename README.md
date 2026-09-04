@@ -95,6 +95,16 @@ Pregame and tied matchups remain neutral. Colour is reinforced by score rails an
 
 The score detail and colour settings are independent. For the quietest presentation, use **Scores only** with **Minimal** colours.
 
+## Player detail
+
+Click any player in either lineup — starter or bench — to open a detail card over the panel. Click the scrim, the close button, or press Escape to dismiss it.
+
+The card shows the player's photo, position, team and jersey number, any injury designation, and three headline numbers: points this week, projection, and season average in your league's scoring. Below that sits the week's box score — only the lines that apply to the position, so a quarterback shows completions and passing yards while a defence shows sacks and points allowed — followed by season totals and player details such as age, size, college, experience, and depth-chart position.
+
+Photos come from Sleeper's public CDN (`sleepercdn.com`), the same source their own app uses, and are fetched through the plugin's existing hardened download path: https-only, size-capped, and validated by magic bytes rather than by the URL or content type, since the CDN serves PNG data from `.jpg` paths. Each photo is cached for 30 days, so a player is fetched once rather than on every viewing, and a team defence resolves to its team logo. If a photo cannot be fetched the card falls back to a position badge.
+
+Box scores and season totals come from Sleeper's stats endpoints on a max-age cache rather than on every refresh — the live scoreboard already comes from the matchups endpoint, so refetching megabytes on a 60-second live cycle would be wasteful. Both degrade to an empty result, leaving the card to show what the payload already carries.
+
 ## Alerts
 
 Three independent settings control what the panel tells you between refreshes.

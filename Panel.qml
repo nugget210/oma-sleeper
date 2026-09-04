@@ -24,6 +24,8 @@ Panel {
   property bool scoreWatchReady: false
   property double leadMargin: 0
   property bool leadWatchReady: false
+  property var selectedPlayer: null
+  property string photoPath: ""
   property double lastHeartbeatMs: Date.now()
   readonly property int maxTeams: 64
   readonly property int maxPlayersPerSection: 32
@@ -176,6 +178,94 @@ Panel {
       root.notify(flip === "gained" ? "Took the lead" : "Lost the lead",
                   scored === "" ? line : scored + " · " + line)
     else if (scored !== "") root.notify(scored, line)
+  }
+  function showPlayer(player) {
+    if (!player) return
+    root.selectedPlayer = player
+    root.photoPath = ""
+    root.loadPhoto(player)
+  }
+  function closePlayer() {
+    root.selectedPlayer = null
+    root.photoPath = ""
+  }
+  // Sleeper's CDN keys headshots by numeric player id, and team defences by the
+  // team abbreviation that stands in for their id.
+  function photoSubject(player) {
+    var subject = String(player && player.id !== undefined ? player.id : "")
+    return /^[0-9]{1,10}$/.test(subject) || /^[A-Z]{2,4}$/.test(subject) ? subject : ""
+  }
+  function loadPhoto(player) {
+    var subject = root.photoSubject(player)
+    if (subject === "" || photoProc.running) return
+    photoProc.subject = subject
+    photoProc.running = true
+  }
+  function statNumber(value) {
+    var number = Number(value || 0)
+    return number === Math.floor(number) ? String(number) : number.toFixed(1)
+  }
+  // Emits only the box-score entries this player actually has, so one ordered
+  // table covers every position without per-position layouts.
+  function statRows(player) {
+    var stats = player && player.stats ? player.stats : {}
+    var definitions = [
+      ["Completions", "pass_cmp"], ["Attempts", "pass_att"], ["Passing yards", "pass_yd"],
+      ["Passing TD", "pass_td"], ["Interceptions thrown", "pass_int"],
+      ["Carries", "rush_att"], ["Rushing yards", "rush_yd"], ["Rushing TD", "rush_td"],
+      ["Longest run", "rush_lng"],
+      ["Targets", "rec_tgt"], ["Receptions", "rec"], ["Receiving yards", "rec_yd"],
+      ["Receiving TD", "rec_td"], ["Longest catch", "rec_lng"],
+      ["Field goals", "fgm"], ["FG attempts", "fga"], ["Extra points", "xpm"], ["XP attempts", "xpa"],
+      ["Sacks", "def_sack"], ["Interceptions", "def_int"], ["Defensive TD", "def_td"],
+      ["Fumbles recovered", "fum_rec"], ["Fumbles lost", "fum_lost"], ["Points allowed", "pts_allow"],
+      ["Snaps", "off_snp"]
+    ]
+    var rows = []
+    for (var i = 0; i < definitions.length; i++) {
+      var value = stats[definitions[i][1]]
+      if (value === undefined || value === null) continue
+      rows.push({label: definitions[i][0], value: root.statNumber(value)})
+    }
+    return rows
+  }
+  function heightText(value) {
+    var inches = parseInt(value, 10)
+    if (!isFinite(inches) || inches <= 0) return String(value || "")
+    return Math.floor(inches / 12) + "'" + (inches % 12) + "\""
+  }
+  function bioRows(player) {
+    var bio = player && player.bio ? player.bio : {}
+    var rows = []
+    if (bio.age) rows.push({label: "Age", value: String(bio.age)})
+    if (bio.height && bio.weight)
+      rows.push({label: "Size", value: root.heightText(bio.height) + ", " + bio.weight + " lb"})
+    if (bio.college) rows.push({label: "College", value: root.boundedText(bio.college, 48)})
+    if (bio.years_exp !== undefined && bio.years_exp !== null)
+      rows.push({label: "Experience", value: Number(bio.years_exp) === 0 ? "Rookie" : bio.years_exp + " seasons"})
+    if (bio.depth_chart_position)
+      rows.push({label: "Depth chart", value: root.boundedText(bio.depth_chart_position, 16)
+        + (bio.depth_chart_order ? " · #" + bio.depth_chart_order : "")})
+    return rows
+  }
+  function boundedText(value, limit) {
+    return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, limit)
+  }
+  function injuryText(player) {
+    var bio = player && player.bio ? player.bio : {}
+    var status = root.boundedText(bio.injury_status, 24)
+    if (status === "") return ""
+    var part = root.boundedText(bio.injury_body_part, 24)
+    return part === "" ? status : status + " · " + part
+  }
+  function seasonAverage(player) {
+    var season = player && player.season ? player.season : null
+    return season && season.average !== null && season.average !== undefined && Number(season.gp) > 0
+      ? Number(season.average).toFixed(1) : "—"
+  }
+  function seasonGames(player) {
+    var season = player && player.season ? player.season : null
+    return season && Number(season.gp) > 0 ? Number(season.gp) + " games" : "No games played"
   }
   function notify(summary, body) {
     if (notifyProc.running) return
@@ -436,6 +526,20 @@ Panel {
     property string body: ""
     command: [root.pluginFile("bin/notify-alert"), summary, body]
   }
+  Process {
+    id: photoProc
+    property string subject: ""
+    command: [root.pluginFile("bin/sleeper-matchup"), "--photo", subject]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // The helper prints one cache path. Anything else leaves the card on
+        // its position-badge placeholder rather than loading an unknown file.
+        var path = String(text).trim()
+        if (/^\/[^\n]{1,4096}\.(jpg|png)$/.test(path)) root.photoPath = path
+      }
+    }
+  }
   Timer {
     id: refreshTimer
     interval: root.adaptiveIntervalMs
@@ -472,7 +576,7 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       blocked: root.settingsOpen
-      onCloseRequested: root.close()
+      onCloseRequested: { if (root.selectedPlayer !== null) root.closePlayer(); else root.close() }
       onTabRequested: function(direction) { if (root.bar) root.bar.switchPanelFrom(root.barIdentity, direction) }
 
       Flickable {
@@ -661,8 +765,196 @@ Panel {
           Row {
             visible: !root.settingsOpen && root.myGame && root.opponentGame
             width: parent.width; spacing: Style.space(16)
-            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; projectedScore: root.projectedScore(root.myGame); opponentScore: root.opponentGame ? root.opponentGame.points : 0; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
-            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; projectedScore: root.projectedScore(root.opponentGame); opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode }
+            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; projectedScore: root.projectedScore(root.myGame); opponentScore: root.opponentGame ? root.opponentGame.points : 0; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode; onPlayerActivated: function(player) { root.showPlayer(player) } }
+            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; projectedScore: root.projectedScore(root.opponentGame); opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode; onPlayerActivated: function(player) { root.showPlayer(player) } }
+          }
+        }
+      }
+
+      // Player detail, drawn over the panel content rather than in a window of
+      // its own so it needs no surface, focus handling, or positioning logic.
+      Item {
+        id: playerCard
+        anchors.fill: parent
+        visible: root.selectedPlayer !== null
+        readonly property var player: root.selectedPlayer || ({})
+        readonly property string injury: root.injuryText(root.selectedPlayer)
+
+        Rectangle {
+          anchors.fill: parent
+          color: Color.menu.scrim
+          MouseArea { anchors.fill: parent; onClicked: root.closePlayer() }
+        }
+
+        Rectangle {
+          anchors.centerIn: parent
+          width: Math.min(parent.width - Style.space(48), Style.space(400))
+          height: Math.min(parent.height - Style.space(32), cardBody.implicitHeight + Style.space(32))
+          radius: Style.cornerRadius * 2
+          color: Color.popups.background
+          border.width: 1
+          border.color: Color.popups.border
+          // Clicks on the card must not reach the dismissing scrim beneath it.
+          MouseArea { anchors.fill: parent }
+
+          Flickable {
+            anchors.fill: parent; anchors.margins: Style.space(16)
+            contentWidth: width; contentHeight: cardBody.implicitHeight
+            clip: true; boundsBehavior: Flickable.StopAtBounds
+
+            Column {
+              id: cardBody
+              width: parent.width
+              spacing: Style.space(12)
+
+              Item {
+                width: parent.width; height: Style.space(72)
+                Rectangle {
+                  id: photoFrame
+                  width: Style.space(72); height: width; radius: Style.cornerRadius
+                  anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                  color: Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.08)
+                  clip: true
+                  Image {
+                    id: photoImage
+                    anchors.fill: parent
+                    source: root.photoPath === "" ? "" : "file://" + root.photoPath
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    visible: status === Image.Ready
+                  }
+                  Text {
+                    anchors.centerIn: parent
+                    visible: photoImage.status !== Image.Ready
+                    text: String(playerCard.player.position || "—")
+                    textFormat: Text.PlainText
+                    color: Qt.darker(root.bar.foreground,1.4)
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true
+                  }
+                }
+                Column {
+                  anchors.left: photoFrame.right; anchors.leftMargin: Style.space(12)
+                  anchors.right: closeCard.left; anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(4)
+                  Text {
+                    width: parent.width; elide: Text.ElideRight
+                    text: String(playerCard.player.name || "")
+                    textFormat: Text.PlainText; color: root.bar.foreground
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true
+                  }
+                  Text {
+                    width: parent.width; elide: Text.ElideRight
+                    text: [String(playerCard.player.position || ""), String(playerCard.player.nfl_team || ""),
+                           playerCard.player.bio && playerCard.player.bio.number ? "#" + playerCard.player.bio.number : ""]
+                          .filter(function(part) { return part !== "" }).join(" · ")
+                    textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.4)
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+                  }
+                  Text {
+                    width: parent.width; elide: Text.ElideRight
+                    visible: playerCard.injury !== ""
+                    text: playerCard.injury
+                    textFormat: Text.PlainText; color: Color.urgent
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+                  }
+                }
+                Rectangle {
+                  id: closeCard
+                  width: Style.space(26); height: width; radius: Style.cornerRadius
+                  anchors.right: parent.right; anchors.top: parent.top
+                  color: closeArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent"
+                  Text { anchors.centerIn: parent; text: "✕"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  MouseArea { id: closeArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.closePlayer() }
+                }
+              }
+
+              Rectangle { width: parent.width; height: 1; color: root.bar.foreground; opacity: .12 }
+
+              Row {
+                width: parent.width; spacing: Style.space(8)
+                Repeater {
+                  model: [
+                    {label: "POINTS", value: root.score(playerCard.player.points)},
+                    {label: "PROJECTED", value: playerCard.player.projected === null || playerCard.player.projected === undefined
+                                                ? "—" : root.score(playerCard.player.projected)},
+                    {label: "SEASON AVG", value: root.seasonAverage(root.selectedPlayer)}
+                  ]
+                  Rectangle {
+                    required property var modelData
+                    width: (cardBody.width - Style.space(16)) / 3; height: Style.space(52); radius: Style.cornerRadius
+                    color: Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.06)
+                    Column {
+                      anchors.centerIn: parent; spacing: Style.space(2)
+                      Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.value; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+                      Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; font.letterSpacing: 1 }
+                    }
+                  }
+                }
+              }
+
+              Text {
+                text: "THIS WEEK"; textFormat: Text.PlainText
+                color: Qt.darker(root.bar.foreground,1.5)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
+              }
+              Text {
+                width: parent.width; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+                visible: root.statRows(root.selectedPlayer).length === 0
+                text: "No box score recorded yet."
+                color: Qt.darker(root.bar.foreground,1.4)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+              }
+              Column {
+                width: parent.width
+                Repeater {
+                  model: root.statRows(root.selectedPlayer)
+                  Item {
+                    required property var modelData
+                    width: cardBody.width; height: Style.space(22)
+                    Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: modelData.label; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.3); font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: modelData.value; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+                  }
+                }
+              }
+
+              Text {
+                text: "SEASON"; textFormat: Text.PlainText
+                color: Qt.darker(root.bar.foreground,1.5)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
+              }
+              Item {
+                width: parent.width; height: Style.space(22)
+                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: root.seasonGames(root.selectedPlayer); textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.3); font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+                Text {
+                  anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                  text: root.selectedPlayer && root.selectedPlayer.season && root.selectedPlayer.season.points !== null
+                        && Number(root.selectedPlayer.season.gp) > 0
+                        ? root.score(root.selectedPlayer.season.points) + " pts" : "—"
+                  textFormat: Text.PlainText; color: root.bar.foreground
+                  font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+                }
+              }
+
+              Text {
+                visible: root.bioRows(root.selectedPlayer).length > 0
+                text: "PLAYER"; textFormat: Text.PlainText
+                color: Qt.darker(root.bar.foreground,1.5)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
+              }
+              Column {
+                width: parent.width
+                Repeater {
+                  model: root.bioRows(root.selectedPlayer)
+                  Item {
+                    required property var modelData
+                    width: cardBody.width; height: Style.space(22)
+                    Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: modelData.label; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.3); font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: modelData.value; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+                  }
+                }
+              }
+            }
           }
         }
       }

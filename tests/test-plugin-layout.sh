@@ -36,6 +36,8 @@ test -x "$repo_dir/bin/notify-alert"
 grep -q 'setting("scoreSound", "ding")' "$repo_dir/Panel.qml"
 grep -q 'setting("leadAlert", true)' "$repo_dir/Panel.qml"
 grep -q 'setting("notifyAlerts", true)' "$repo_dir/Panel.qml"
+grep -q -- '--photo' "$repo_dir/bin/sleeper-matchup"
+grep -q 'sleepercdn.com' "$repo_dir/bin/sleeper-matchup"
 test ! -e "$repo_dir/install.sh"
 jq -e '.id == "nugget210.oma-sleeper" and .entryPoints.barWidget == "BarWidget.qml"' "$repo_dir/manifest.json" >/dev/null
 grep -q 'setting("leagueId", "")' "$repo_dir/Panel.qml"

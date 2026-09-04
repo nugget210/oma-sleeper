@@ -16,7 +16,16 @@ Item {
   readonly property real tolerance: Math.max(2, Number(player.expected||0) * .15)
   readonly property int pace: !evaluable ? 0 : (Number(player.points||0) > expectedPace+tolerance ? 1 : (Number(player.points||0) < expectedPace-tolerance ? -1 : 2))
   readonly property color paceColor: pace === 1 ? "#86b875" : (pace === -1 ? Color.urgent : (pace === 2 ? "#d6a34a" : root.bar.foreground))
+  signal activated()
+  // An empty lineup slot carries the placeholder id "0" and has nothing to show.
+  readonly property bool selectable: Boolean(player.id) && String(player.id) !== "0"
   height: Style.space(28)
+  Rectangle {
+    anchors.fill: parent; anchors.leftMargin: -Style.space(4); anchors.rightMargin: -Style.space(4)
+    radius: Style.cornerRadius
+    visible: root.selectable && rowArea.containsMouse
+    color: Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.07)
+  }
   Rectangle { id: slotBadge; width: Style.space(34); height: Style.space(20); anchors.verticalCenter: parent.verticalCenter; radius: Style.cornerRadius; color: root.colorMode === "minimal" ? "transparent" : Qt.rgba(Color.accent.r,Color.accent.g,Color.accent.b,.09)
     Text { anchors.centerIn: parent; text: root.player.slot; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.45); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption }
   }
@@ -50,4 +59,11 @@ Item {
     }
   }
   Text { id: pts; width: Style.space(42); horizontalAlignment: Text.AlignRight; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: (root.pace===1?"▲ ":(root.pace===-1?"▼ ":(root.pace===2?"● ":""))) + Number(root.player.points||0).toFixed(1); textFormat: Text.PlainText; color: root.colorMode === "minimal" || !root.evaluable ? root.bar.foreground : root.paceColor; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
+  MouseArea {
+    id: rowArea
+    anchors.fill: parent
+    hoverEnabled: true
+    cursorShape: root.selectable ? Qt.PointingHandCursor : Qt.ArrowCursor
+    onClicked: if (root.selectable) root.activated()
+  }
 }

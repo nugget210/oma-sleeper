@@ -22,10 +22,12 @@ function extractFunction(name) {
 }
 
 const FUNCTIONS = [
-  "score", "boundedLabel", "soundChoice", "soundFile", "playSound", "playAlert",
-  "starterPoints", "isAlertingPanel", "resetAlertWatch", "gameInResult",
+  "score", "boundedLabel", "boundedText", "soundChoice", "soundFile", "playSound",
+  "playAlert", "starterPoints", "isAlertingPanel", "resetAlertWatch", "gameInResult",
   "opponentInResult", "scoringPlays", "leadChange", "playSummary", "scoreLine",
   "notify", "reviewScoring",
+  "photoSubject", "statNumber", "statRows", "heightText", "bioRows", "injuryText",
+  "seasonAverage", "seasonGames",
 ];
 
 // Stand-ins for the QML objects the functions touch.
@@ -216,6 +218,71 @@ assert("boundedLabel strips control characters",
   root.boundedLabel("a\u0001b\u0002c\u007fd"));
 assert("boundedLabel bounds the length",
   root.boundedLabel("x".repeat(200)).length === 24);
+
+// --- player detail card -----------------------------------------------------
+// Only Sleeper's own id shapes may reach the photo helper: a numeric player id,
+// or the team abbreviation that stands in as a team defence's id.
+assert("photoSubject accepts a numeric player id", root.photoSubject({ id: "7564" }) === "7564");
+assert("photoSubject accepts a team defence", root.photoSubject({ id: "MIN" }) === "MIN");
+assert("photoSubject rejects anything else",
+  [{ id: "" }, { id: "0/../etc" }, { id: "../../etc/passwd" }, { id: "lowercase" },
+   { id: "99999999999" }, {}, null].every((p) => root.photoSubject(p) === ""),
+  JSON.stringify([{ id: "0/../etc" }, { id: "lowercase" }].map((p) => root.photoSubject(p))));
+
+assert("statNumber keeps whole numbers whole", root.statNumber(7) === "7", root.statNumber(7));
+assert("statNumber gives one decimal otherwise", root.statNumber(7.25) === "7.3", root.statNumber(7.25));
+
+const receiver = {
+  stats: { rec: 6, rec_tgt: 9, rec_yd: 84, rec_td: 1, off_snp: 45 },
+  season: { gp: 16, points: 313.6, average: 19.6 },
+  bio: { age: 26, height: "72", weight: "205", college: "LSU", years_exp: 5,
+         depth_chart_position: "LWR", depth_chart_order: 1,
+         injury_status: "Questionable", injury_body_part: "Knee" },
+};
+const statLabels = root.statRows(receiver).map((r) => r.label + " " + r.value);
+assert("statRows emits only the stats present",
+  statLabels.join(", ") === "Targets 9, Receptions 6, Receiving yards 84, Receiving TD 1, Snaps 45",
+  statLabels.join(", "));
+assert("statRows is empty when no box score exists", root.statRows({ stats: {} }).length === 0);
+assert("statRows tolerates a player with no stats key", root.statRows({}).length === 0);
+
+// A quarterback and a defence must render from the same ordered table.
+const passerLabels = root.statRows({ stats: { pass_cmp: 22, pass_att: 31, pass_yd: 268, pass_td: 3, pass_int: 1 } })
+  .map((r) => r.label);
+assert("statRows covers passing lines",
+  passerLabels.join(",") === "Completions,Attempts,Passing yards,Passing TD,Interceptions thrown",
+  passerLabels.join(","));
+const defenceLabels = root.statRows({ stats: { def_sack: 3, def_int: 2, pts_allow: 17 } }).map((r) => r.label);
+assert("statRows covers defensive lines",
+  defenceLabels.join(",") === "Sacks,Interceptions,Points allowed", defenceLabels.join(","));
+
+assert("heightText converts inches to feet", root.heightText("72") === "6'0\"", root.heightText("72"));
+assert("heightText handles a remainder", root.heightText("74") === "6'2\"", root.heightText("74"));
+assert("heightText passes through unusable input", root.heightText("") === "");
+
+const bioLabels = root.bioRows(receiver).map((r) => r.label + " " + r.value);
+assert("bioRows renders size, college and depth chart",
+  bioLabels.join(" | ") === "Age 26 | Size 6'0\", 205 lb | College LSU | Experience 5 seasons | Depth chart LWR · #1",
+  bioLabels.join(" | "));
+assert("bioRows calls a first-year player a rookie",
+  root.bioRows({ bio: { years_exp: 0 } }).some((r) => r.value === "Rookie"));
+assert("bioRows is empty for an unknown player", root.bioRows({}).length === 0);
+
+assert("injuryText joins status and body part",
+  root.injuryText(receiver) === "Questionable · Knee", root.injuryText(receiver));
+assert("injuryText is empty for a healthy player",
+  root.injuryText({ bio: { injury_status: "", injury_body_part: "" } }) === "");
+assert("injuryText strips control characters from remote text",
+  root.injuryText({ bio: { injury_status: "Out", injury_body_part: "" } }) === "Out",
+  root.injuryText({ bio: { injury_status: "Out", injury_body_part: "" } }));
+
+assert("seasonAverage formats to one decimal", root.seasonAverage(receiver) === "19.6");
+assert("seasonAverage is a dash before any games",
+  root.seasonAverage({ season: { gp: 0, points: 0, average: null } }) === "—");
+assert("seasonAverage tolerates a missing season", root.seasonAverage({}) === "—");
+assert("seasonGames counts games played", root.seasonGames(receiver) === "16 games");
+assert("seasonGames reports an unplayed season",
+  root.seasonGames({ season: { gp: 0 } }) === "No games played");
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");
