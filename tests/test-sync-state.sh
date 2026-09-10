@@ -13,11 +13,16 @@ live='{"events":[{"date":"2026-08-30T08:00:00Z","status":{"type":{"state":"in"}}
 pregame='{"events":[{"date":"2026-08-30T17:30:00Z","status":{"type":{"state":"pre"}}}]}'
 later='{"events":[{"date":"2026-08-31T17:30:00Z","status":{"type":{"state":"pre"}}}]}'
 complete='{"events":[{"date":"2026-08-30T14:00:00Z","status":{"type":{"state":"post"}}}]}'
+# ESPN omits the seconds that jq's fromdateiso8601 requires.
+minute_precision='{"events":[{"date":"2026-08-30T17:30Z","status":{"type":{"state":"pre"}}}]}'
+unparseable='{"events":[{"date":"soon","status":{"type":{"state":"pre"}}}]}'
 
 [[ "$(classify <<<"$live")" == live ]]
 [[ "$(classify <<<"$pregame")" == pregame ]]
 [[ "$(classify <<<"$later")" == idle ]]
 [[ "$(classify <<<"$complete")" == idle ]]
+[[ "$(classify <<<"$minute_precision")" == pregame ]]
+[[ "$(classify <<<"$unparseable")" == idle ]]
 [[ "$(classify <<<'{"events":[]}')" == idle ]]
 
 echo "Adaptive sync-state tests passed"

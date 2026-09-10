@@ -350,11 +350,20 @@ readonly players_schema='type == "object" and length <= 20000
     and (((.value.last_name // "") | type) == "string") and (((.value.last_name // "") | length) <= 100)
     and (((.value.position // "") | type) == "string") and (((.value.position // "") | test("^[A-Z0-9_/-]{0,16}$")))
     and (((.value.team // "") | type) == "string") and (((.value.team // "") | test("^[A-Z]{0,4}$"))))'
-readonly scoreboard_schema='type == "object" and (.events | type) == "array" and (.events | length) <= 128
+# ESPN stamps kickoff times as "2026-09-10T00:20Z", omitting the seconds that
+# fromdateiso8601 requires. Rejecting that form discarded every scoreboard
+# response, which left every player's game status "idle": no live highlight, no
+# live-weighted projection, and the slow idle refresh cadence.
+readonly scoreboard_schema='def kickoff_epoch:
+    if type != "string" then null
+    else (if test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$") then sub("Z$"; ":00Z") else . end)
+      | (try fromdateiso8601 catch null)
+    end;
+  type == "object" and (.events | type) == "array" and (.events | length) <= 128
   and all(.events[];
     type == "object"
     and (.date | type) == "string" and (.date | length) <= 64
-    and ((try (.date | fromdateiso8601) catch null) != null)
+    and ((.date | kickoff_epoch) != null)
     and (.season | type) == "object"
     and (.season.type | type) == "number" and .season.type == (.season.type | floor)
     and (.season.type >= 0 and .season.type <= 4)
