@@ -15,10 +15,32 @@ Item {
   // be scanned for "who is playing" without reading each row's clock. Minimal
   // colour mode keeps the theme foreground rather than introducing the accent.
   readonly property color liveTint: root.colorMode === "minimal" ? root.bar.foreground : Color.accent
-  readonly property bool evaluable: showPace && player.slot !== "BN" && (live || gameStatus.state === "post") && Number(player.expected_samples||0) >= 2 && Number(gameStatus.progress||0) >= .10
-  readonly property real expectedPace: Number(player.expected||0) * Number(gameStatus.progress||0)
-  readonly property real tolerance: Math.max(2, Number(player.expected||0) * .15)
-  readonly property int pace: !evaluable ? 0 : (Number(player.points||0) > expectedPace+tolerance ? 1 : (Number(player.points||0) < expectedPace-tolerance ? -1 : 2))
+  // Pace is measured against the share of the projection the game has reached:
+  // at half time, half the projection. It was previously measured against a
+  // rolling average of the player's own previous weeks, which needed two
+  // completed weeks before it could say anything, so it showed nothing at all
+  // for the first fortnight of a season. The projection is available from week
+  // one and is the number the rest of the panel already reasons about.
+  readonly property real benchmark: Number(player.projected)
+  readonly property bool evaluable: showPace && player.slot !== "BN"
+    && (live || gameStatus.state === "post")
+    && isFinite(root.benchmark) && root.benchmark > 0
+    && Number(gameStatus.progress||0) >= .10
+  readonly property int pace: root.evaluable
+    ? root.paceAgainst(player.points, root.benchmark, gameStatus.progress) : 0
+  // 1 above pace, -1 below, 2 on pace, 0 when there is nothing to compare. The
+  // tolerance band keeps ordinary variance from reading as decisive, and its
+  // two-point floor stops a small projection making every wobble look like one.
+  function paceAgainst(points, benchmark, progress) {
+    var target = Number(benchmark)
+    if (!isFinite(target) || target <= 0) return 0
+    var reached = target * Math.max(0, Math.min(1, Number(progress) || 0))
+    var tolerance = Math.max(2, target * .15)
+    var scored = Number(points) || 0
+    if (scored > reached + tolerance) return 1
+    if (scored < reached - tolerance) return -1
+    return 2
+  }
   readonly property color paceColor: pace === 1 ? "#86b875" : (pace === -1 ? Color.urgent : (pace === 2 ? "#d6a34a" : root.bar.foreground))
   signal activated()
   // An empty lineup slot carries the placeholder id "0" and has nothing to show.

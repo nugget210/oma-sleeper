@@ -7,12 +7,12 @@ if [[ "${OMA_SLEEPER_WORKER:-}" != 1 ]]; then
   exec python3 "$entry_dir/../lib/secure-helper.py" --supervise "${BASH_SOURCE[0]}" "$@"
 fi
 
-readonly MAX_WEEK=18 MAX_HISTORY_WEEKS=4 MAX_TEAMS=64 MAX_STARTERS=32 MAX_BENCH=32
+readonly MAX_WEEK=18 MAX_TEAMS=64 MAX_STARTERS=32 MAX_BENCH=32
 readonly MAX_STATE_BYTES=$((64 * 1024)) MAX_LEAGUE_BYTES=$((512 * 1024))
 readonly MAX_USERS_BYTES=$((2 * 1024 * 1024)) MAX_ROSTERS_BYTES=$((2 * 1024 * 1024))
 readonly MAX_MATCHUPS_BYTES=$((4 * 1024 * 1024)) MAX_PROJECTIONS_BYTES=$((16 * 1024 * 1024))
 readonly MAX_SCOREBOARD_BYTES=$((4 * 1024 * 1024)) MAX_PLAYERS_BYTES=$((32 * 1024 * 1024))
-readonly MAX_HISTORY_BYTES=$((MAX_HISTORY_WEEKS * MAX_MATCHUPS_BYTES)) MAX_OUTPUT_BYTES=$((2 * 1024 * 1024))
+readonly MAX_OUTPUT_BYTES=$((2 * 1024 * 1024))
 readonly MAX_STATS_BYTES=$((8 * 1024 * 1024)) MAX_SEASON_STATS_BYTES=$((16 * 1024 * 1024))
 readonly MAX_IMAGE_BYTES=$((1024 * 1024)) MAX_IMAGE_AGE_SECONDS=$((30 * 24 * 3600))
 
@@ -464,24 +464,6 @@ else
   season_stats_file="$(empty_json_file)"
 fi
 
-history_files=()
-if (( week > 1 )); then
-  first_history_week=$((week - MAX_HISTORY_WEEKS))
-  (( first_history_week < 1 )) && first_history_week=1
-  for (( previous_week=first_history_week; previous_week<week; previous_week++ )); do
-    cache_fetch "history-$league_id-$previous_week" 31536000 \
-      "$api/league/$league_id/matchups/$previous_week" "$MAX_MATCHUPS_BYTES" "$matchups_schema" \
-      || die "invalid matchup history response"
-    history_files+=("$CACHE_FILE")
-  done
-fi
-new_temp_file
-history_file="$TEMP_FILE"
-if (( ${#history_files[@]} > 0 )); then jq -s '.' "${history_files[@]}" > "$history_file"; else printf '[]\n' > "$history_file"; fi
-valid_json_file "$history_file" "$MAX_HISTORY_BYTES" \
-  'type == "array" and length <= 4 and all(.[]; type == "array" and length <= 64)' \
-  || die "bounded matchup history could not be built"
-
 # Sleeper owns all fantasy data. ESPN supplies only a bounded game-clock signal.
 date_from="$(date -u -d '4 days ago' +%Y%m%d)"
 date_to="$(date -u -d '4 days' +%Y%m%d)"
@@ -502,7 +484,7 @@ output_file="$TEMP_FILE"
 jq -n \
   --slurpfile league_input "$league_file" --slurpfile users_input "$users_file" \
   --slurpfile rosters_input "$rosters_file" --slurpfile matchups_input "$matchups_file" \
-  --slurpfile history_input "$history_file" --slurpfile scoreboard_input "$scoreboard_file" \
+  --slurpfile scoreboard_input "$scoreboard_file" \
   --slurpfile players_input "$players_file" --slurpfile projections_input "$projections_file" \
   --slurpfile stats_input "$stats_file" --slurpfile season_stats_input "$season_stats_file" \
   --argjson week "$week" --arg sync_state "$sync_state" \
@@ -511,7 +493,6 @@ jq -n \
   ($users_input[0][0:$max_teams]) as $users |
   ($rosters_input[0][0:$max_teams]) as $rosters |
   ($matchups_input[0][0:$max_teams]) as $matchups |
-  ($history_input[0][0:4]) as $history |
   ($scoreboard_input[0]) as $scoreboard |
   ($players_input[0]) as $players |
   ($projections_input[0]) as $projections |
@@ -524,8 +505,6 @@ jq -n \
     ([$users[] | select(.user_id == $owner) | .metadata.team_name][0] //
       [$users[] | select(.user_id == $owner) | .display_name][0] // null) as $candidate |
     short_text($candidate; "Roster " + ($rid | tostring); 80);
-  def baseline($id): [$history[][]? | .players_points[$id] // empty] as $values |
-    {expected:(if ($values | length) > 0 then ($values | add / length) else null end), samples:($values | length)};
   def projection($id):
     ($projections[$id] // null) as $stats |
     if $stats == null then null
@@ -609,14 +588,14 @@ jq -n \
      injury_body_part: short_text(($p.injury_body_part // ""); ""; 24),
      depth_chart_position: short_text(($p.depth_chart_position // ""); ""; 16)};
   def player($id; $points; $slot):
-    ($players[$id] // {}) as $player_data | baseline($id) as $base |
+    ($players[$id] // {}) as $player_data |
     {id:$id, slot:short_text($slot; "BN"; 16),
      name:(if $id == "0" then "Empty" elif ($id | test("^[A-Z]+$")) then ($id[0:8] + " Defense")
            else short_text(([$player_data.first_name, $player_data.last_name] |
              map(select(type == "string" and length > 0)) | join(" ")); $id[0:32]; 80) end),
      position:short_text(($player_data.position // (if ($id | test("^[A-Z]+$")) then "DEF" else "" end)); ""; 16),
      nfl_team:short_text(($player_data.team // ""); ""; 8), points:($points[$id] // 0),
-     projected:projection($id), expected:$base.expected, expected_samples:$base.samples,
+     projected:projection($id),
      game_status:game_status(($player_data.team // $id)[0:8]),
      stats:stat_line($id), scoring:scoring($id), season:season_line($id), bio:bio($id)};
   [$league.roster_positions[0:$max_starters][] | select(. != "BN")] as $slots |

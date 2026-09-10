@@ -178,9 +178,13 @@ FAKE_MODE=normal CURL_LOG="$test_root/curl.log" CACHE_SWAP_ROOT="$test_root" PAT
 jq -e '.week == 18 and (.teams | length) == 1 and (.games | length) == 1' "$test_root/output" >/dev/null
 
 matchup_requests="$(awk -F '\t' '$1 ~ /\/matchups\/[0-9]+$/ {count++} END {print count+0}' "$test_root/curl.log")"
-[[ "$matchup_requests" -eq 5 ]]
+[[ "$matchup_requests" -eq 1 ]]
 mapfile -t download_paths < <(awk -F '\t' '$2 != "" {print $2}' "$test_root/curl.log")
-(( ${#download_paths[@]} >= 10 ))
+# A forced refresh at an explicit week downloads the league, its users, its
+# rosters, that week's matchups, projections, weekly and season stats, the
+# scoreboard, and the player map. The NFL state endpoint is skipped because the
+# week is given rather than resolved.
+(( ${#download_paths[@]} >= 9 ))
 for path in "${download_paths[@]}"; do
   [[ "$path" == /proc/self/fd/*/.oma-sleeper.session.*/*.oma-sleeper.download.* ]]
 done

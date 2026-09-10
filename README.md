@@ -53,7 +53,7 @@ No league, roster, team name, or bar label is included in the plugin defaults.
 
 ## Live matchup data
 
-During games, every player whose NFL game is on right now is highlighted in the lineup — a tinted row with an accent edge and a slow pulse — so the players currently earning points can be picked out at a glance. Team defences are highlighted the same way. Each active player also shows the NFL quarter, clock, and a progress rail. With at least two prior league weeks available, the current score is compared with that player's rolling fantasy average at the same game progress: green/`▲` is above pace, orange/`●` is near pace, and urgent red/`▼` is below pace. Pregame and insufficient-history states remain neutral.
+During games, every player whose NFL game is on right now is highlighted in the lineup — a tinted row with an accent edge and a slow pulse — so the players currently earning points can be picked out at a glance. Team defences are highlighted the same way. Each active player also shows the NFL quarter, clock, and a progress rail. Once a game is at least a tenth played, the score so far is compared with the share of that player's projection the game has reached — half the projection at half time: green/`▲` is above pace, orange/`●` is near pace, and urgent red/`▼` is below pace. A tolerance band of 15% of the projection, never narrower than two points, keeps ordinary variance from reading as decisive. A finished game is compared with the whole projection, so the mark says whether the player beat it. Players yet to kick off, and any without a projection, stay neutral.
 
 Each team header shows its projected final score beside its current score. Projections use Sleeper's weekly player data and the league's scoring settings, and are composed the way the Sleeper app composes them: the points a team has already banked, plus a projection for each player yet to kick off. A player whose game is under way therefore contributes what they have actually scored, so the projected total dips at kickoff and climbs back as points come in. Projection data refreshes alongside matchup scores, including every 60 seconds during live games.
 
@@ -61,7 +61,7 @@ Before the round begins, team and player scores remain at zero while the team he
 
 The compact bar derives matchup state from the NFL games attached to both starting lineups. It shows `UPCOMING` while starter games are scheduled and `● LIVE` when any starter is playing. Completed slates have no status suffix for now. If schedule data is unavailable, no status suffix is shown rather than guessing.
 
-Player metadata is cached once per day in `~/.cache/oma-sleeper` because Sleeper recommends fetching the full NFL player map sparingly. League, user, and roster metadata is cached for one hour. Pace comparisons use at most the four previous matchup weeks. Matchup scores use adaptive refresh intervals:
+Player metadata is cached once per day in `~/.cache/oma-sleeper` because Sleeper recommends fetching the full NFL player map sparingly. League, user, and roster metadata is cached for one hour. Matchup scores use adaptive refresh intervals:
 
 - 60 seconds while an NFL game is live
 - 5 minutes when a game starts within three hours

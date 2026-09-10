@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Runs tests/alert-logic.js against the alert functions in Panel.qml.
+# Runs tests/alert-logic.js against the functions in Panel.qml and PlayerRow.qml.
 #
 # Panel.qml is injected as a JSON string literal rather than read by the test
 # itself, so the harness needs no file API and runs on whichever JavaScript
@@ -31,6 +31,9 @@ trap 'rm -rf -- "$work_dir"' EXIT
 {
   printf 'const QML_SOURCE = '
   jq -Rs . <"$repo_dir/Panel.qml"
+  printf ';\n'
+  printf 'const PLAYER_ROW_SOURCE = '
+  jq -Rs . <"$repo_dir/PlayerRow.qml"
   printf ';\n'
   cat "$repo_dir/tests/alert-logic.js"
 } >"$work_dir/run.js"

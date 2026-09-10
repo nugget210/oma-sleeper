@@ -6,20 +6,21 @@
 //
 // QML_SOURCE is prepended by tests/test-alert-logic.sh.
 
-function extractFunction(name) {
+function extractFunctionFrom(source, label, name) {
   const marker = "\n  function " + name + "(";
-  const start = QML_SOURCE.indexOf(marker);
-  if (start < 0) throw new Error("function not found in Panel.qml: " + name);
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error("function not found in " + label + ": " + name);
   let depth = 0;
-  for (let i = QML_SOURCE.indexOf("{", start); i < QML_SOURCE.length; i++) {
-    if (QML_SOURCE[i] === "{") depth++;
-    else if (QML_SOURCE[i] === "}") {
+  for (let i = source.indexOf("{", start); i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") {
       depth--;
-      if (depth === 0) return QML_SOURCE.slice(start + "\n  function ".length, i + 1);
+      if (depth === 0) return source.slice(start + "\n  function ".length, i + 1);
     }
   }
   throw new Error("unbalanced braces reading: " + name);
 }
+function extractFunction(name) { return extractFunctionFrom(QML_SOURCE, "Panel.qml", name); }
 
 // Object-literal properties are read the same way as the functions above, by
 // balancing braces from the declaration, so the tests exercise the shipped
@@ -51,6 +52,8 @@ const FUNCTIONS = [
   "scoringLabel", "scoringRate", "scoringRows",
 ];
 
+const ROW_FUNCTIONS = ["paceAgainst"];
+
 // Stand-ins for the QML objects the functions touch.
 const alertProc = { running: false, soundPath: "" };
 const notifyProc = { running: false, summary: "", body: "" };
@@ -72,6 +75,10 @@ const root = {
   scoringLabels: extractObject("scoringLabels"),
 };
 for (const name of FUNCTIONS) eval("root." + name + " = function " + extractFunction(name));
+// The scoreboard row carries its own pace maths, so it is extracted the same way.
+const row = {};
+for (const name of ROW_FUNCTIONS)
+  eval("row." + name + " = function " + extractFunctionFrom(PLAYER_ROW_SOURCE, "PlayerRow.qml", name));
 
 let failures = 0;
 function assert(label, condition, detail) {
@@ -442,6 +449,41 @@ assert("scoringLabel keeps negative rules readable",
 assert("scoringRate renders a whole rate without trailing zeros",
   root.scoringRate(6) === "6" && root.scoringRate(-1) === "-1");
 
+
+// Pace measures a live score against the share of the projection the game has
+// reached, so it says something from week one rather than waiting for two
+// completed weeks of the player's own history.
+assert("paceAgainst reports above pace",
+  row.paceAgainst(14, 20, .5) === 1);
+assert("paceAgainst reports below pace",
+  row.paceAgainst(2, 20, .5) === -1);
+assert("paceAgainst reports on pace inside the tolerance band",
+  row.paceAgainst(10, 20, .5) === 2 && row.paceAgainst(12, 20, .5) === 2);
+
+// The band is 15% of the projection, floored at two points so a small
+// projection does not make every wobble look decisive.
+// A projection of 6 gives 15% = 0.9, so the floor of 2 is what applies.
+assert("paceAgainst floors the tolerance band at two points",
+  row.paceAgainst(1.5, 6, 0) === 2 && row.paceAgainst(2.5, 6, 0) === 1);
+assert("paceAgainst widens the band for a large projection",
+  row.paceAgainst(4, 30, 0) === 2 && row.paceAgainst(6, 30, 0) === 1);
+
+// A finished game compares the final score with the whole projection.
+assert("paceAgainst compares a finished game with the full projection",
+  row.paceAgainst(6, 6.66, 1) === 2 && row.paceAgainst(24, 15, 1) === 1
+    && row.paceAgainst(2, 15, 1) === -1);
+
+assert("paceAgainst says nothing without a usable projection",
+  row.paceAgainst(9, 0, .5) === 0 && row.paceAgainst(9, null, .5) === 0
+    && row.paceAgainst(9, undefined, .5) === 0 && row.paceAgainst(9, -4, .5) === 0);
+
+// Unclamped, a progress of 5 would expect 100 points and -3 would expect -60,
+// so both of these would read as decisive rather than on pace.
+assert("paceAgainst bounds progress to the game",
+  row.paceAgainst(21, 20, 5) === 2 && row.paceAgainst(0, 20, -3) === 2);
+
+assert("paceAgainst treats a missing score as none scored",
+  row.paceAgainst(null, 20, 1) === -1 && row.paceAgainst(undefined, 20, 0) === 2);
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");
