@@ -1,28 +1,17 @@
-# Omarchy Sleeper Fantasy Matchup Plugin
+# Sleeper Matchup
 
 A theme-aware Omarchy bar widget for live Sleeper fantasy football matchups.
 
-The compact bar score opens a two-column matchup panel containing teams, starters, bench players, positions, NFL teams, and live fantasy points. It uses Omarchy's active font and theme tokens, with optional performance and monochrome colour modes.
-
-## Preview
+The compact bar score opens a two-column panel showing both lineups, live game clocks, projected totals, and a per-player breakdown of exactly how each score was earned.
 
 ![Live Sleeper fantasy matchup scoreboard](preview.png)
-
-The compact menubar view keeps the current matchup visible at a glance:
-
-![Compact Sleeper matchup score in the Omarchy menubar](assets/oma-sleeper-menubar.png)
 
 ## Requirements
 
 - Omarchy 4.x with `omarchy-shell`
-- Python 3
-- `curl`
-- `jq`
-- A public Sleeper fantasy football league
+- `curl`, `jq`, and Python 3
+- A public Sleeper fantasy football league — Sleeper's read-only API needs no login or key
 - Optional, for alerts: an audio player (`pw-play`, `paplay`, `aplay`, or `ffplay`) and `notify-send`
-
-Sleeper's read-only league API does not require authentication.
-Because `curl` and `jq` are external system dependencies, the marketplace may classify the plugin as requiring manual setup until they are installed. Python 3 supplies the local cache and process-safety supervisor.
 
 ## Install
 
@@ -30,104 +19,9 @@ Because `curl` and `jq` are external system dependencies, the marketplace may cl
 omarchy plugin add https://github.com/nugget210/oma-sleeper.git --enable
 ```
 
-Omarchy installs the plugin as `nugget210.oma-sleeper`. Choose a bar position when prompted.
-
-## Set up
-
-1. Click `NFL SETUP` in the bar.
-2. Open the cog if the settings view is not already visible.
-3. Paste a Sleeper league URL or numeric league ID and select **Update**.
-4. Select your fantasy team.
-5. Optionally enter a short bar label, choose a colour mode, and choose the score detail shown for players.
-6. Select **Save**.
-
-No league, roster, team name, or bar label is included in the plugin defaults.
-
-## Controls
-
-- Left click: open or close the matchup panel
-- Middle click: refresh matchup data
-- Cog: settings
-- External-link icon: open the matchup on Sleeper
-- Refresh icon: refresh immediately
-
-## Live matchup data
-
-During games, every player whose NFL game is on right now is highlighted in the lineup — a tinted row with an accent edge and a slow pulse — so the players currently earning points can be picked out at a glance. Team defences are highlighted the same way. Each active player also shows the NFL quarter, clock, and a progress rail. Once a game is at least a tenth played, the score so far is compared with the share of that player's projection the game has reached — half the projection at half time: green/`▲` is above pace, orange/`●` is near pace, and urgent red/`▼` is below pace. A tolerance band of 15% of the projection, never narrower than two points, keeps ordinary variance from reading as decisive. A finished game is compared with the whole projection, so the mark says whether the player beat it. Players yet to kick off, and any without a projection, stay neutral.
-
-Each team header shows its projected final score beside its current score. Projections use Sleeper's weekly player data and the league's scoring settings, and are composed the way the Sleeper app composes them: the points a team has already banked, plus a projection for each player yet to kick off. A player whose game is under way therefore contributes what they have actually scored, so the projected total dips at kickoff and climbs back as points come in. Projection data refreshes alongside matchup scores, including every 60 seconds during live games.
-
-Before the round begins, team and player scores remain at zero while the team headers continue to show the full projected lineup totals. Preseason NFL results are excluded from regular-season matchup state.
-
-The compact bar derives matchup state from the NFL games attached to both starting lineups. It shows `UPCOMING` while starter games are scheduled and `● LIVE` when any starter is playing. Completed slates have no status suffix for now. If schedule data is unavailable, no status suffix is shown rather than guessing.
-
-Player metadata is cached once per day in `~/.cache/oma-sleeper` because Sleeper recommends fetching the full NFL player map sparingly. League, user, and roster metadata is cached for one hour. Matchup scores use adaptive refresh intervals:
-
-- 60 seconds while an NFL game is live
-- 5 minutes when a game starts within three hours
-- 15 minutes while the slate is idle or completed
-- Immediately when the panel opens, the refresh button is selected, or the computer wakes
-
-Sleeper remains the source of all fantasy data. The public ESPN NFL scoreboard supplies only the live/upcoming/idle game-clock signal used to choose a refresh interval.
-
-## Resource safety
-
-All remote responses have endpoint-specific download and collection limits and must pass a JSON schema check before use. League IDs, NFL weeks, seasons, roster IDs, player IDs, names, and score collections are type-checked and bounded. Every cache path component is opened as a directory without following symbolic links, then checked for safe ownership and permissions. The final directory is pinned before its permissions change or any cache operation begins, and all writes remain anchored to that descriptor. Cached inputs are hard-linked into a private per-run directory so validation and later processing use the same inode; validated downloads are atomically renamed from unique temporary files. Cache directories are owner-only.
-
-The complete refresh has a 90-second wall-clock deadline covering cache setup, downloads, JSON validation, reduction, and output generation. On expiry, its isolated process group receives `TERM`, then `KILL` after a short grace period, and all adopted child processes are reaped so the panel cannot remain in a loading state indefinitely.
-
-The generated QML payload is capped at 2 MiB and the interface renders at most 64 teams, 32 starters, and 32 bench players per team. Remote and user-provided strings are rendered explicitly as plain text. Optional home/opponent labels have a 24-character limit at both input and persistence boundaries, with control characters removed before they enter `shell.json`.
-
-## Colour modes
-
-- **Theme-aware** uses the current Omarchy accent, foreground, muted, popup, and urgent colours.
-- **Performance** adds green leader emphasis while retaining Omarchy's urgent colour for the trailing team.
-- **Minimal** keeps the scoreboard monochrome.
-
-Pregame and tied matchups remain neutral. Colour is reinforced by score rails and directional symbols rather than being the only indicator.
-
-## Score detail modes
-
-- **Full** shows live clocks, game-progress rails, pace colours, and pace symbols.
-- **Scores only** shows plain player names and scores, and also removes the team comparison rail, colours, and directional symbols.
-- **Game progress** keeps neutral clocks and progress rails but removes player pace styling.
-- **Pace only** keeps player pace colours and symbols but removes clocks and progress rails.
-
-The score detail and colour settings are independent. For the quietest presentation, use **Scores only** with **Minimal** colours.
-
-## Player detail
-
-Click any player in either lineup — starter or bench — to open a detail card over the panel. Click the scrim, the close button, or press Escape to dismiss it.
-
-The card shows the player's photo, position, team and jersey number, any injury designation, and whether their game is live (`● LIVE · Q3 4:12`, with a progress rail), final, or still to come. Then three headline numbers: points this week, projection, and season average in your league's scoring.
-
-Beneath those sits **How these points were scored**, an itemised breakdown of the week's score. Each line names the rule in plain English, shows the count against your league's rate, and gives the points it earned — so a shutout reads `Shutout  1 × 10  10.0` and a quarterback's passing yards read `Passing yards  245 × 0.04  9.8`. The lines come from your league's own scoring settings multiplied by the player's actual stats, largest contributor first, so they follow any change your commissioner makes. Sleeper's per-player total stays authoritative: if a live box score briefly lags the points already awarded, the difference is carried as its own line rather than left to disagree with the number above it.
-
-Below that sits the week's box score — only the lines that apply to the position, so a quarterback shows completions and passing yards while a defence shows sacks, tackles, and yards allowed — followed by season totals and player details such as age, size, college, experience, and depth-chart position.
-
-The card reads from the current payload rather than from the row that opened it, so points, the breakdown, and the game clock keep updating while it is open.
-
-Photos come from Sleeper's public CDN (`sleepercdn.com`), the same source their own app uses, and are fetched through the plugin's existing hardened download path: https-only, size-capped, and validated by magic bytes rather than by the URL or content type, since the CDN serves PNG data from `.jpg` paths. Each photo is cached for 30 days, so a player is fetched once rather than on every viewing, and a team defence resolves to its team logo. If a photo cannot be fetched the card falls back to a position badge.
-
-Box scores and season totals come from Sleeper's stats endpoints on a max-age cache. The weekly box score backs the scoring breakdown, so it tracks the live refresh closely; season totals are much larger and only feed the season average, so they are held far longer. Both degrade to an empty result, leaving the card to show what the payload already carries.
-
-## Alerts
-
-Three independent settings control what the panel tells you between refreshes.
-
-- **Score alert** — **Off**, **Ding**, **Chime**, or **Blip**. Plays when one of your starters gains points. Selecting a sound previews it.
-- **Lead change alert** — a rising three-note tone when you take the lead, falling when you lose it. Three notes rather than one, so a lead change is never mistaken for the scoring tone.
-- **Desktop notifications** — names the scorer and the gain (`Ja'Marr Chase +6.4`) with the current score line, so you can read the play without opening the panel.
-
-When a scoring play also flips the lead, the lead tone takes priority and a single notification reports both, rather than two sounds and two popups.
-
-Alerts are deliberately conservative. The first refresh after opening the panel, changing league, or switching team only establishes a baseline, so you never hear points that were already on the board. Downward stat corrections and lineup changes stay silent, floating-point noise is ignored, and a multi-monitor bar raises one alert per event rather than one per screen.
-
-The tones are short synthesized sines under `assets/sounds/`, regenerated by `assets/sounds/generate-sounds.py`. Playback shells out to the first available of `pw-play`, `paplay`, `aplay`, or `ffplay`, and notifications use `notify-send`. On a host with none of these, alerts are simply silent — no error is surfaced, and nothing else about the panel changes.
+Then click **NFL SETUP** in the bar, paste a Sleeper league URL or numeric league ID, select **Update**, choose your team, and **Save**. No league, roster, or team name ships in the defaults.
 
 ## Update
-
-Git-managed installations can be updated with:
 
 ```bash
 omarchy plugin update nugget210.oma-sleeper
@@ -135,15 +29,71 @@ omarchy plugin update nugget210.oma-sleeper
 
 ## Uninstall
 
-Remove the plugin with:
-
 ```bash
 omarchy plugin remove nugget210.oma-sleeper
 ```
 
-## Data source
+## Features
 
-League, roster, matchup, and player information comes from the public [Sleeper API](https://docs.sleeper.com/).
+- **Live scoreboard** — both lineups side by side, starters and bench, with positions, NFL teams, and live fantasy points.
+- **Live highlighting** — every player whose NFL game is on right now gets a tinted row, an accent edge, and a slow pulse, so you can see at a glance who is currently earning points. Team defences too.
+- **Game clocks** — active players show the quarter, the clock, and a progress rail.
+- **Projected totals** — each team header shows its projected final score, composed the way the Sleeper app composes it: points already banked plus a projection for every player yet to kick off.
+- **Pace arrows** — once a game is a tenth played, `▲` / `●` / `▼` show whether a starter is running above, on, or below the share of their projection the game has reached.
+- **Scoring breakdown** — the player card itemises what earned the points, in plain English, against your league's own scoring rules.
+- **Alerts** — optional sounds and desktop notifications for scoring plays and lead changes.
+- **Adaptive refresh** — 60 seconds while a game is live, 5 minutes when kickoff is within three hours, 15 minutes otherwise, and immediately when the panel opens or the machine wakes.
+
+## The panel
+
+Click a player or defence in either lineup to open their detail card.
+
+| | |
+|---|---|
+| **Headline numbers** | Points this week, projection, and season average in your league's scoring. |
+| **How these points were scored** | One line per scoring rule the player triggered, showing the count against your league's rate and the points it produced — `Shutout 1 × 10 → 10.0`, `Passing yards 245 × 0.04 → 9.8`. Derived from your league's settings, so it follows any change your commissioner makes. |
+| **Game status** | `● LIVE · Q3 4:12` with a progress rail, or `FINAL`, or `YET TO PLAY`. |
+| **This week** | The box score lines that apply to the position — completions and passing yards for a quarterback, sacks and yards allowed for a defence. |
+| **Season** | Games played and total points, plus age, size, college, experience, and depth-chart position. |
+
+Photos come from Sleeper's public CDN, cached for 30 days, with a team defence resolving to its team logo and a position badge as fallback.
+
+## Options
+
+Open the cog in the panel.
+
+| Option | Choices | Default |
+|---|---|---|
+| League | Sleeper league URL or numeric ID | none |
+| Fantasy team | your team in that league | none |
+| Bar label | short name shown in the bar | none |
+| Colour mode | **Theme-aware**, **Performance** (green leader), **Minimal** (monochrome) | Theme-aware |
+| Score detail | **Full**, **Scores only**, **Game progress**, **Pace only** | Full |
+| Score alert | **Off**, **Ding**, **Chime**, **Blip** — plays when a starter gains points | Ding |
+| Lead change alert | on / off — a rising three-note tone when you take the lead, falling when you lose it | on |
+| Desktop notifications | on / off — names the scorer and the gain with the current score line | on |
+
+Colour mode and score detail are independent. For the quietest presentation, use **Scores only** with **Minimal**.
+
+Alerts are deliberately conservative: the first refresh after opening, changing league, or switching team only establishes a baseline, so you never hear points already on the board. Stat corrections and lineup changes stay silent, and a multi-monitor bar raises one alert per event rather than one per screen. On a host with no audio player or `notify-send`, alerts are simply silent.
+
+## Controls
+
+- **Left click** — open or close the panel
+- **Middle click** — refresh
+- **Cog** — settings
+- **External-link icon** — open the matchup on Sleeper
+- **Refresh icon** — refresh immediately
+
+## Data and privacy
+
+All fantasy data comes from the public [Sleeper API](https://docs.sleeper.com/). The public ESPN NFL scoreboard supplies only the game-clock signal used to decide the refresh interval and to mark games live. Nothing is sent anywhere else, and no credentials are involved. Responses are cached under `~/.cache/oma-sleeper` in a directory owned by and readable only by you.
+
+## Development
+
+```bash
+for t in tests/test-*.sh; do bash "$t"; done
+```
 
 ## License
 

@@ -46,9 +46,14 @@ jq -e '.id == "nugget210.oma-sleeper" and .entryPoints.barWidget == "BarWidget.q
 grep -q 'setting("leagueId", "")' "$repo_dir/Panel.qml"
 grep -q 'setting("rosterId", 0)' "$repo_dir/Panel.qml"
 grep -q 'setting("shortName", "")' "$repo_dir/Panel.qml"
+# The marketplace submission checklist requires the README to document the
+# external dependencies, the licence, and both install and removal.
 grep -q '`curl`' "$repo_dir/README.md"
 grep -q '`jq`' "$repo_dir/README.md"
 grep -q 'Python 3' "$repo_dir/README.md"
-grep -q 'manual setup' "$repo_dir/README.md"
+grep -q 'omarchy plugin add' "$repo_dir/README.md"
+grep -q 'omarchy plugin remove' "$repo_dir/README.md"
+grep -q 'omarchy plugin update' "$repo_dir/README.md"
+grep -qi 'MIT' "$repo_dir/README.md"
 
 echo "Plugin layout test passed"
