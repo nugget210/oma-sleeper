@@ -6,6 +6,10 @@ The compact bar score opens a two-column panel showing both lineups, live game c
 
 ![Live Sleeper fantasy matchup scoreboard](preview.png)
 
+It sits in the bar as a single score, so the matchup stays visible without opening anything:
+
+![Compact Sleeper matchup score in the Omarchy bar](assets/oma-sleeper-menubar.png)
+
 ## Requirements
 
 - Omarchy 4.x with `omarchy-shell`
@@ -44,9 +48,11 @@ omarchy plugin remove nugget210.oma-sleeper
 - **Alerts** — optional sounds and desktop notifications for scoring plays and lead changes.
 - **Adaptive refresh** — 60 seconds while a game is live, 5 minutes when kickoff is within three hours, 15 minutes otherwise, and immediately when the panel opens or the machine wakes.
 
-## The panel
+## The player card
 
-Click a player or defence in either lineup to open their detail card.
+Click any player or defence in either lineup — starter or bench — to open their detail card.
+
+![Player detail card showing a scoring breakdown](assets/oma-sleeper-player-card.png)
 
 | | |
 |---|---|
@@ -54,7 +60,8 @@ Click a player or defence in either lineup to open their detail card.
 | **How these points were scored** | One line per scoring rule the player triggered, showing the count against your league's rate and the points it produced — `Shutout 1 × 10 → 10.0`, `Passing yards 245 × 0.04 → 9.8`. Derived from your league's settings, so it follows any change your commissioner makes. |
 | **Game status** | `● LIVE · Q3 4:12` with a progress rail, or `FINAL`, or `YET TO PLAY`. |
 | **This week** | The box score lines that apply to the position — completions and passing yards for a quarterback, sacks and yards allowed for a defence. |
-| **Season** | Games played and total points, plus age, size, college, experience, and depth-chart position. |
+| **Season** | Games played and total points in your league's scoring. |
+| **Player** | Age, size, college, experience, and depth-chart position. |
 
 Photos come from Sleeper's public CDN, cached for 30 days, with a team defence resolving to its team logo and a position badge as fallback.
 
