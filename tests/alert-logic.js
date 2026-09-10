@@ -28,6 +28,7 @@ const FUNCTIONS = [
   "notify", "reviewScoring",
   "photoSubject", "statNumber", "statRows", "heightText", "bioRows", "injuryText",
   "seasonAverage", "seasonGames",
+  "gameStatusText", "playerById",
 ];
 
 // Stand-ins for the QML objects the functions touch.
@@ -283,6 +284,47 @@ assert("seasonAverage tolerates a missing season", root.seasonAverage({}) === "�
 assert("seasonGames counts games played", root.seasonGames(receiver) === "16 games");
 assert("seasonGames reports an unplayed season",
   root.seasonGames({ season: { gp: 0 } }) === "No games played");
+// The detail card repeats the scoreboard's game clock, so a score being read
+// there is not mistaken for a final one while the quarter is still running.
+assert("gameStatusText reports a live quarter and clock",
+  root.gameStatusText({game_status: {state: "in", period: 3, clock: "4:12"}}) === "● LIVE · Q3 4:12");
+
+assert("gameStatusText copes with a live game before the clock is known",
+  root.gameStatusText({game_status: {state: "in", period: 0, clock: ""}}) === "● LIVE");
+
+assert("gameStatusText marks a finished game",
+  root.gameStatusText({game_status: {state: "post", period: 4, clock: "0:00"}}) === "FINAL");
+
+assert("gameStatusText marks a game still to come",
+  root.gameStatusText({game_status: {state: "pre", period: 0, clock: "0:00"}}) === "YET TO PLAY");
+
+assert("gameStatusText says nothing without a game status",
+  root.gameStatusText({}) === "" && root.gameStatusText(null) === ""
+    && root.gameStatusText({game_status: {state: "idle"}}) === "");
+
+assert("gameStatusText strips control characters out of the clock",
+  root.gameStatusText({game_status: {state: "in", period: 2, clock: "4:1\u00072"}}) === "● LIVE · Q2 4:12");
+
+assert("gameStatusText bounds an out-of-range quarter",
+  root.gameStatusText({game_status: {state: "in", period: 99, clock: "1:00"}}) === "● LIVE · Q10 1:00");
+
+// The card looks the player up in the current payload each refresh, so an open
+// card follows the live score instead of freezing at the moment it opened.
+root.data = {games: [{starters: [{id: "4046", points: 3}], bench: [{id: "7611", points: 9}]},
+                     {starters: [{id: "NE", points: 12}], bench: []}]};
+assert("playerById finds a starter in the current payload",
+  root.playerById("4046").points === 3);
+assert("playerById finds a bench player in the current payload",
+  root.playerById("7611").points === 9);
+assert("playerById finds a team defence by its abbreviation",
+  root.playerById("NE").points === 12);
+assert("playerById reports nothing for a player no longer rostered",
+  root.playerById("9999") === null);
+assert("playerById reports nothing without a selection or payload",
+  root.playerById("") === null && root.playerById(null) === null);
+root.data = null;
+assert("playerById tolerates an empty payload",
+  root.playerById("4046") === null);
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");

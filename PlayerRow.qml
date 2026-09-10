@@ -11,6 +11,10 @@ Item {
   readonly property bool showPace: displayMode === "full" || displayMode === "pace"
   readonly property var gameStatus: player.game_status || ({state:"idle",progress:0})
   readonly property bool live: gameStatus.state === "in"
+  // A row whose NFL game is on right now is tinted and edged so the lineup can
+  // be scanned for "who is playing" without reading each row's clock. Minimal
+  // colour mode keeps the theme foreground rather than introducing the accent.
+  readonly property color liveTint: root.colorMode === "minimal" ? root.bar.foreground : Color.accent
   readonly property bool evaluable: showPace && player.slot !== "BN" && (live || gameStatus.state === "post") && Number(player.expected_samples||0) >= 2 && Number(gameStatus.progress||0) >= .10
   readonly property real expectedPace: Number(player.expected||0) * Number(gameStatus.progress||0)
   readonly property real tolerance: Math.max(2, Number(player.expected||0) * .15)
@@ -20,6 +24,26 @@ Item {
   // An empty lineup slot carries the placeholder id "0" and has nothing to show.
   readonly property bool selectable: Boolean(player.id) && String(player.id) !== "0"
   height: Style.space(28)
+  Rectangle {
+    id: liveHighlight
+    anchors.fill: parent; anchors.leftMargin: -Style.space(4); anchors.rightMargin: -Style.space(4)
+    radius: Style.cornerRadius
+    visible: root.live
+    color: Qt.rgba(root.liveTint.r,root.liveTint.g,root.liveTint.b,.14)
+    Rectangle {
+      anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+      width: Style.space(3); radius: parent.radius
+      color: root.liveTint
+    }
+    // The pulse only runs while the row is both live and actually on screen, so
+    // a closed panel or a finished game leaves no animation running.
+    SequentialAnimation on opacity {
+      running: root.live && root.visible
+      loops: Animation.Infinite
+      NumberAnimation { from: 1; to: .5; duration: 1100; easing.type: Easing.InOutSine }
+      NumberAnimation { from: .5; to: 1; duration: 1100; easing.type: Easing.InOutSine }
+    }
+  }
   Rectangle {
     anchors.fill: parent; anchors.leftMargin: -Style.space(4); anchors.rightMargin: -Style.space(4)
     radius: Style.cornerRadius
@@ -39,7 +63,7 @@ Item {
       anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
       text: root.player.name
       textFormat: Text.PlainText
-      color: root.player.slot === "BN" ? Color.muted : root.bar.foreground
+      color: root.player.slot === "BN" && !root.live ? Color.muted : root.bar.foreground
       font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
     }
     Text {
@@ -48,7 +72,7 @@ Item {
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       text: "· " + root.player.nfl_team; elide: Text.ElideRight
       textFormat: Text.PlainText
-      color: root.player.slot === "BN" ? Color.muted : root.bar.foreground
+      color: root.player.slot === "BN" && !root.live ? Color.muted : root.bar.foreground
       font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
     }
   }

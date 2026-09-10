@@ -24,7 +24,11 @@ Panel {
   property bool scoreWatchReady: false
   property double leadMargin: 0
   property bool leadWatchReady: false
-  property var selectedPlayer: null
+  property string selectedPlayerId: ""
+  // The card reads the player out of the current payload rather than holding
+  // the object that was clicked, so points, the scoring breakdown and the game
+  // clock keep updating while it is open instead of freezing when it opened.
+  readonly property var selectedPlayer: root.playerById(root.selectedPlayerId)
   property string photoPath: ""
   property double lastHeartbeatMs: Date.now()
   readonly property int maxTeams: 64
@@ -179,15 +183,44 @@ Panel {
                   scored === "" ? line : scored + " · " + line)
     else if (scored !== "") root.notify(scored, line)
   }
+  function playerById(id) {
+    if (!id || id === "" || !root.data || !root.data.games) return null
+    for (var g = 0; g < root.data.games.length; g++) {
+      var sections = [root.data.games[g].starters || [], root.data.games[g].bench || []]
+      for (var s = 0; s < sections.length; s++)
+        for (var i = 0; i < sections[s].length; i++)
+          if (String(sections[s][i].id) === id) return sections[s][i]
+    }
+    return null
+  }
+  // The same game clock the scoreboard rows carry, worded for the detail card.
+  function gameStatusText(player) {
+    var status = player && player.game_status ? player.game_status : null
+    if (!status) return ""
+    if (status.state === "in") {
+      var clock = String(status.clock || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 16)
+      var period = Math.max(0, Math.min(10, Math.floor(Number(status.period || 0))))
+      return "● LIVE" + (period > 0 ? " · Q" + period : "") + (clock === "" ? "" : " " + clock)
+    }
+    if (status.state === "post") return "FINAL"
+    if (status.state === "pre") return "YET TO PLAY"
+    return ""
+  }
   function showPlayer(player) {
-    if (!player) return
-    root.selectedPlayer = player
+    if (!player || !player.id || String(player.id) === "0") return
+    root.selectedPlayerId = String(player.id)
     root.photoPath = ""
     root.loadPhoto(player)
   }
   function closePlayer() {
-    root.selectedPlayer = null
+    root.selectedPlayerId = ""
     root.photoPath = ""
+  }
+  // Sleeper's CDN keys headshots by numeric player id, and team defences by the
+  // team abbreviation that stands in for their id.
+  function photoSubject(player) {
+    var subject = String(player && player.id !== undefined ? player.id : "")
+    return /^[0-9]{1,10}$/.test(subject) || /^[A-Z]{2,4}$/.test(subject) ? subject : ""
   }
   // Sleeper's CDN keys headshots by numeric player id, and team defences by the
   // team abbreviation that stands in for their id.
@@ -779,6 +812,10 @@ Panel {
         visible: root.selectedPlayer !== null
         readonly property var player: root.selectedPlayer || ({})
         readonly property string injury: root.injuryText(root.selectedPlayer)
+        readonly property var status: (root.selectedPlayer && root.selectedPlayer.game_status) || ({})
+        readonly property string statusText: root.gameStatusText(root.selectedPlayer)
+        readonly property bool live: playerCard.status.state === "in"
+        readonly property real progress: Math.max(0, Math.min(1, Number(playerCard.status.progress || 0)))
 
         Rectangle {
           anchors.fill: parent
@@ -857,6 +894,45 @@ Panel {
                     text: playerCard.injury
                     textFormat: Text.PlainText; color: Color.urgent
                     font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+                  }
+                  // The scoreboard row already says whether this game is on;
+                  // the card repeats it so the number above is not read as a
+                  // final score while the quarter is still running.
+                  Item {
+                    width: parent.width; height: Style.space(22)
+                    visible: playerCard.statusText !== ""
+                    Rectangle {
+                      id: statusPill
+                      anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                      width: statusLabel.implicitWidth + Style.space(14); height: Style.space(18)
+                      radius: Style.cornerRadius
+                      color: playerCard.live ? Qt.rgba(Color.accent.r,Color.accent.g,Color.accent.b,.16)
+                                             : Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.08)
+                      Text {
+                        id: statusLabel
+                        anchors.centerIn: parent
+                        text: playerCard.statusText; textFormat: Text.PlainText
+                        color: playerCard.live && root.colorMode !== "minimal"
+                               ? Color.accent : Qt.darker(root.bar.foreground,1.4)
+                        font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; font.letterSpacing: 1
+                      }
+                      SequentialAnimation on opacity {
+                        running: playerCard.live && statusPill.visible
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 1; to: .55; duration: 1100; easing.type: Easing.InOutSine }
+                        NumberAnimation { from: .55; to: 1; duration: 1100; easing.type: Easing.InOutSine }
+                      }
+                    }
+                  }
+                  Rectangle {
+                    visible: playerCard.live
+                    width: parent.width; height: Style.space(3); radius: height / 2
+                    color: Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.10)
+                    Rectangle {
+                      width: parent.width * playerCard.progress; height: parent.height
+                      radius: height / 2
+                      color: root.colorMode === "minimal" ? root.bar.foreground : Color.accent
+                    }
                   }
                 }
                 Rectangle {

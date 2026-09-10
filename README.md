@@ -53,7 +53,7 @@ No league, roster, team name, or bar label is included in the plugin defaults.
 
 ## Live matchup data
 
-During games, each active player shows the NFL quarter, clock, and a progress rail. With at least two prior league weeks available, the current score is compared with that player's rolling fantasy average at the same game progress: green/`▲` is above pace, orange/`●` is near pace, and urgent red/`▼` is below pace. Pregame and insufficient-history states remain neutral.
+During games, every player whose NFL game is on right now is highlighted in the lineup — a tinted row with an accent edge and a slow pulse — so the players currently earning points can be picked out at a glance. Team defences are highlighted the same way. Each active player also shows the NFL quarter, clock, and a progress rail. With at least two prior league weeks available, the current score is compared with that player's rolling fantasy average at the same game progress: green/`▲` is above pace, orange/`●` is near pace, and urgent red/`▼` is below pace. Pregame and insufficient-history states remain neutral.
 
 Each team header shows its projected final score beside its current score. Projections use Sleeper's weekly player data and the league's scoring settings; while a game is live, points already earned are combined with the unplayed share of the player's projection. Projection data refreshes alongside matchup scores, including every 60 seconds during live games.
 
