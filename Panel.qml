@@ -512,11 +512,24 @@ Panel {
   Process {
     id: fetchProc
     command: [root.pluginFile("bin/sleeper-matchup"), root.leagueId, "auto", root.forceMetadataRefresh ? "force" : "normal"]
+    // The helper's own diagnostics say which endpoint gave up. Without them a
+    // discarded refresh reached the journal only as an opaque parse failure.
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var message = String(text).replace(/[\u0000-\u001f\u007f]+/g, " ").trim()
+        if (message !== "") console.warn("Sleeper matchup: helper reported -", message.slice(0, 500))
+      }
+    }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         try {
           var payload = String(text)
+          // A refresh that failed prints nothing at all. onExited already
+          // reports why, and its specific wording ("League not found") must
+          // not be overwritten by the generic message in the catch below.
+          if (payload.trim() === "") return
           if (payload.length > root.maxPayloadCharacters) throw new Error("Matchup response is too large")
           var result = root.boundedResult(JSON.parse(payload))
           if (root.hostWidget && typeof root.hostWidget.publishData === "function") root.hostWidget.publishData(result)

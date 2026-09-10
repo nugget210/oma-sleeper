@@ -24,6 +24,7 @@ required_files=(
   tests/test-alert-logic.sh
   tests/test-qml-safety.sh
   tests/test-scoreboard-schema.sh
+  tests/test-cache-race.sh
   tests/test-sync-state.sh
   tests/test-resource-safety.sh
 )
