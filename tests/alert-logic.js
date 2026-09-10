@@ -29,6 +29,7 @@ const FUNCTIONS = [
   "photoSubject", "statNumber", "statRows", "heightText", "bioRows", "injuryText",
   "seasonAverage", "seasonGames",
   "gameStatusText", "playerById",
+  "projectedScore",
 ];
 
 // Stand-ins for the QML objects the functions touch.
@@ -325,6 +326,46 @@ assert("playerById reports nothing without a selection or payload",
 root.data = null;
 assert("playerById tolerates an empty payload",
   root.playerById("4046") === null);
+// projectedScore mirrors how Sleeper composes a matchup projection: the points
+// already banked, plus a projection for every player who has yet to kick off.
+// These figures are a real week-1 matchup, checked against the Sleeper app.
+function projectedStarter(points, projected, state, progress) {
+  return {points: points, projected: projected,
+          game_status: {state: state, progress: progress || 0}};
+}
+function projectedLineup(starters) { return {starters: starters}; }
+
+const yetToPlay = [21.3386, 22.1, 15.944, 17.108, 12.477, 10.526, 12.281, 15.613, 6.53]
+  .map(projected => projectedStarter(0, projected, "pre"));
+
+assert("projectedScore banks a live player's actual points",
+  root.projectedScore(projectedLineup(yetToPlay.concat([projectedStarter(12, 6.66, "in", .5261)]))).toFixed(2) === "145.92",
+  root.projectedScore(projectedLineup(yetToPlay.concat([projectedStarter(12, 6.66, "in", .5261)]))));
+
+assert("projectedScore ignores the unplayed remainder of a live projection",
+  root.projectedScore(projectedLineup([projectedStarter(3, 20, "in", .25)])).toFixed(2) === "3.00");
+
+assert("projectedScore uses projections while every game is still to come",
+  root.projectedScore(projectedLineup(yetToPlay)).toFixed(2) === "133.92");
+
+assert("projectedScore banks a finished player's actual points",
+  root.projectedScore(projectedLineup([projectedStarter(0, 10, "pre"), projectedStarter(18.4, 12, "post")])).toFixed(2) === "28.40");
+
+// A finished game carried over from the previous week sits inside the same
+// scoreboard window, so a scoreless post state before this week's kickoff must
+// not collapse the projection to zero.
+assert("projectedScore keeps projections for a stale post state before kickoff",
+  root.projectedScore(projectedLineup([projectedStarter(0, 10, "post"), projectedStarter(0, 14, "pre")])).toFixed(2) === "24.00");
+
+assert("projectedScore skips players with no projection",
+  root.projectedScore(projectedLineup([projectedStarter(0, null, "pre"), projectedStarter(0, 9, "pre")])).toFixed(2) === "9.00");
+
+assert("projectedScore reports nothing when no starter is projected",
+  root.projectedScore(projectedLineup([projectedStarter(0, null, "pre")])) === null);
+
+assert("projectedScore tolerates a missing lineup",
+  root.projectedScore(null) === null);
+
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");

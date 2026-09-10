@@ -335,15 +335,19 @@ Panel {
         break
       }
     }
+    // Sleeper composes this number as the points already banked plus a
+    // projection for each player yet to kick off, so a player whose game is
+    // under way contributes only what they have actually scored. Adding the
+    // unplayed remainder of their projection on top read high against the
+    // Sleeper app for every live player.
     for (var i = 0; i < game.starters.length; i++) {
       var player = game.starters[i]
       var projection = player.projected
       if (projection === null || projection === undefined || !isFinite(Number(projection))) continue
       projectedPlayers++
       var status = player.game_status || {}
-      var progress = Math.max(0, Math.min(1, Number(status.progress || 0)))
-      if (status.state === "post" && roundStarted) total += Number(player.points || 0)
-      else if (status.state === "in") total += Number(player.points || 0) + Number(projection) * (1 - progress)
+      var kickedOff = status.state === "in" || status.state === "post"
+      if (kickedOff && roundStarted) total += Number(player.points || 0)
       else total += Number(projection)
     }
     return projectedPlayers > 0 ? total : null
