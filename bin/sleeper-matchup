@@ -439,17 +439,19 @@ refresh_cache_or_default "projections-$season-$week" "$api/projections/nfl/regul
   "$MAX_PROJECTIONS_BYTES" "$projections_schema" '{}'
 projections_file="$CACHE_FILE"
 
-# Box scores and season totals back the player detail card. They are read on a
-# max-age rather than every refresh: the live scoreboard already comes from the
-# matchups endpoint, so these only need to be reasonably current, and refetching
-# megabytes on a 60-second live cycle would be wasteful. Both degrade to an
-# empty object, leaving the card to fall back to what the payload already has.
+# Box scores and season totals back the player detail card. The weekly box
+# score is small and now itemises how each score was earned, so it tracks the
+# live refresh closely; a longer max-age left the breakdown reconciling against
+# points the matchups endpoint had already moved past. Season totals are much
+# larger and only feed a season average, so they stay on a long max-age. Both
+# degrade to an empty object, leaving the card to fall back to what the payload
+# already has.
 empty_json_file() {
   new_temp_file
   printf '{}\n' > "$TEMP_FILE"
   printf '%s' "$TEMP_FILE"
 }
-if cache_fetch "stats-$season-$week" 300 "$api/stats/nfl/regular/$season/$week" \
+if cache_fetch "stats-$season-$week" 30 "$api/stats/nfl/regular/$season/$week" \
     "$MAX_STATS_BYTES" "$projections_schema"; then
   stats_file="$CACHE_FILE"
 else
@@ -559,10 +561,30 @@ jq -n \
     reduce ([ "pass_att","pass_cmp","pass_yd","pass_td","pass_int",
               "rush_att","rush_yd","rush_td","rush_lng",
               "rec","rec_tgt","rec_yd","rec_td","rec_lng",
-              "fgm","fga","xpm","xpa",
+              "fgm","fga","fgm_lng","xpm","xpa",
               "def_int","def_sack","def_td","fum_rec","fum_lost","pts_allow",
+              # A team defence is scored under its own keys, so the list above
+              # matched none of them and every defence read as having no box
+              # score at all.
+              "sack","int","ff","safe","blk_kick","qb_hit","def_pass_def",
+              "def_st_td","def_st_ff","def_st_fum_rec",
+              "tkl","tkl_solo","tkl_ast","tkl_loss","yds_allow",
               "off_snp","tm_off_snp" ][]) as $key
       ({}; if (($s[$key] // null) | type) == "number" then .[$key] = $s[$key] else . end);
+  # Every league scoring rule this player actually triggered, so the card can
+  # show how a score was earned rather than only its total. The per-player
+  # total from Sleeper stays authoritative; this is the same multiplication it
+  # performs, itemised, and the caller reconciles any remainder.
+  def scoring($id):
+    ($week_stats[$id] // {}) as $s |
+    [ $league.scoring_settings | to_entries[]
+      | select((.value | type) == "number" and .value != 0)
+      | .key as $key | ($s[$key] // null) as $count
+      | select(($count | type) == "number" and $count != 0)
+      | {stat: $key, count: $count, rate: .value,
+         points: (($count * .value) * 100 | round / 100)} ]
+    | sort_by(if .points < 0 then .points else -.points end)
+    | .[0:24];
   def season_line($id):
     ($season_stats[$id] // null) as $s |
     if $s == null then null
@@ -596,7 +618,7 @@ jq -n \
      nfl_team:short_text(($player_data.team // ""); ""; 8), points:($points[$id] // 0),
      projected:projection($id), expected:$base.expected, expected_samples:$base.samples,
      game_status:game_status(($player_data.team // $id)[0:8]),
-     stats:stat_line($id), season:season_line($id), bio:bio($id)};
+     stats:stat_line($id), scoring:scoring($id), season:season_line($id), bio:bio($id)};
   [$league.roster_positions[0:$max_starters][] | select(. != "BN")] as $slots |
   [$rosters[0:$max_teams][] | {roster_id, name:teamname(.roster_id)}] as $teams |
   [$matchups[0:$max_teams][] |
@@ -618,6 +640,8 @@ readonly output_schema='type == "object"
   and (.games | type) == "array" and (.games | length) <= 64
   and all(.games[];
     (.starters | type) == "array" and (.starters | length) <= 32
-    and (.bench | type) == "array" and (.bench | length) <= 32)'
+    and (.bench | type) == "array" and (.bench | length) <= 32
+    and all((.starters + .bench)[];
+      (.scoring | type) == "array" and (.scoring | length) <= 24))'
 valid_json_file "$output_file" "$MAX_OUTPUT_BYTES" "$output_schema" || die "bounded matchup output validation failed"
 cat -- "$output_file"

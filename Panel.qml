@@ -222,12 +222,6 @@ Panel {
     var subject = String(player && player.id !== undefined ? player.id : "")
     return /^[0-9]{1,10}$/.test(subject) || /^[A-Z]{2,4}$/.test(subject) ? subject : ""
   }
-  // Sleeper's CDN keys headshots by numeric player id, and team defences by the
-  // team abbreviation that stands in for their id.
-  function photoSubject(player) {
-    var subject = String(player && player.id !== undefined ? player.id : "")
-    return /^[0-9]{1,10}$/.test(subject) || /^[A-Z]{2,4}$/.test(subject) ? subject : ""
-  }
   function loadPhoto(player) {
     var subject = root.photoSubject(player)
     if (subject === "" || photoProc.running) return
@@ -240,6 +234,87 @@ Panel {
   }
   // Emits only the box-score entries this player actually has, so one ordered
   // table covers every position without per-position layouts.
+  // Sleeper scoring keys in plain English, so the breakdown teaches what earned
+  // a score rather than restating its stat key. Anything unmapped falls back to
+  // the key with its underscores opened out, so a rule this table has not seen
+  // still reads sensibly instead of being dropped.
+  readonly property var scoringLabels: ({
+    "pass_yd": "Passing yards", "pass_td": "Passing TD", "pass_int": "Interception thrown",
+    "pass_2pt": "2-point pass", "pass_sack": "Sacked", "pass_fd": "Passing first down",
+    "rush_yd": "Rushing yards", "rush_td": "Rushing TD", "rush_2pt": "2-point rush",
+    "rush_fd": "Rushing first down", "rush_att": "Carry",
+    "rec": "Reception", "rec_yd": "Receiving yards", "rec_td": "Receiving TD",
+    "rec_2pt": "2-point catch", "rec_fd": "Receiving first down",
+    "fum": "Fumble", "fum_lost": "Fumble lost", "fum_rec": "Fumble recovered",
+    "fum_rec_td": "Fumble return TD", "ff": "Forced fumble",
+    "int": "Interception", "int_ret_yd": "Interception return yards",
+    "sack": "Sack", "sack_yd": "Sack yards", "safe": "Safety",
+    "blk_kick": "Blocked kick", "def_td": "Defensive TD", "def_pass_def": "Pass defended",
+    "def_st_td": "Special teams TD", "def_st_ff": "Special teams forced fumble",
+    "def_st_fum_rec": "Special teams fumble recovery",
+    "st_td": "Special teams TD", "st_ff": "Special teams forced fumble",
+    "st_fum_rec": "Special teams fumble recovery", "kr_td": "Kick return TD",
+    "pr_td": "Punt return TD", "tkl_solo": "Solo tackle", "tkl_ast": "Assisted tackle",
+    "tkl_loss": "Tackle for loss", "qb_hit": "QB hit",
+    "pts_allow_0": "Shutout", "pts_allow_1_6": "Allowed 1–6 points",
+    "pts_allow_7_13": "Allowed 7–13 points", "pts_allow_14_20": "Allowed 14–20 points",
+    "pts_allow_21_27": "Allowed 21–27 points", "pts_allow_28_34": "Allowed 28–34 points",
+    "pts_allow_35p": "Allowed 35+ points", "pts_allow": "Points allowed",
+    "yds_allow_0_100": "Allowed under 100 yards", "yds_allow_100_199": "Allowed 100–199 yards",
+    "yds_allow_200_299": "Allowed 200–299 yards", "yds_allow_300_349": "Allowed 300–349 yards",
+    "yds_allow_350_399": "Allowed 350–399 yards", "yds_allow_400_449": "Allowed 400–449 yards",
+    "yds_allow_450_499": "Allowed 450–499 yards", "yds_allow_500_549": "Allowed 500–549 yards",
+    "yds_allow_550p": "Allowed 550+ yards",
+    "fgm": "Field goal", "fgm_0_19": "Field goal 0–19 yds", "fgm_20_29": "Field goal 20–29 yds",
+    "fgm_30_39": "Field goal 30–39 yds", "fgm_40_49": "Field goal 40–49 yds",
+    "fgm_50_59": "Field goal 50–59 yds", "fgm_50p": "Field goal 50+ yds",
+    "fgm_60p": "Field goal 60+ yds", "fgmiss": "Field goal missed",
+    "fgmiss_0_19": "Missed FG 0–19 yds", "fgmiss_20_29": "Missed FG 20–29 yds",
+    "fgmiss_30_39": "Missed FG 30–39 yds", "fgmiss_40_49": "Missed FG 40–49 yds",
+    "fgmiss_50p": "Missed FG 50+ yds",
+    "xpm": "Extra point", "xpmiss": "Extra point missed",
+    "bonus_pass_yd_300": "300-yard passing bonus", "bonus_pass_yd_400": "400-yard passing bonus",
+    "bonus_rush_yd_100": "100-yard rushing bonus", "bonus_rush_yd_200": "200-yard rushing bonus",
+    "bonus_rec_yd_100": "100-yard receiving bonus", "bonus_rec_yd_200": "200-yard receiving bonus",
+    "bonus_rec_te": "Tight end reception bonus",
+    "idp_sack": "Sack", "idp_int": "Interception", "idp_tkl_solo": "Solo tackle",
+    "idp_tkl_ast": "Assisted tackle", "idp_tkl_loss": "Tackle for loss",
+    "idp_ff": "Forced fumble", "idp_fum_rec": "Fumble recovered", "idp_pass_def": "Pass defended"
+  })
+  function scoringLabel(key) {
+    var known = root.scoringLabels[String(key)]
+    if (known) return known
+    var words = String(key).replace(/_/g, " ").trim()
+    return words === "" ? "Other" : words.charAt(0).toUpperCase() + words.slice(1)
+  }
+  // A rate reads as the league rule it is: 0.1 a point per yard, 6 a touchdown.
+  // parseFloat drops the trailing zeros toFixed leaves behind, so 0.04 stays
+  // 0.04 while 6.00 reads as 6.
+  function scoringRate(value) {
+    return String(parseFloat(Number(value || 0).toFixed(4)))
+  }
+  function scoringRows(player) {
+    var lines = player && player.scoring ? player.scoring : []
+    var rows = []
+    var itemised = 0
+    for (var i = 0; i < lines.length && rows.length < root.maxPlayersPerSection; i++) {
+      var points = Number(lines[i].points)
+      var count = Number(lines[i].count)
+      if (!isFinite(points) || !isFinite(count)) continue
+      itemised += points
+      rows.push({label: root.scoringLabel(lines[i].stat),
+                 detail: root.statNumber(count) + " × " + root.scoringRate(lines[i].rate),
+                 value: root.score(points)})
+    }
+    // The per-player total from Sleeper is authoritative and the box score
+    // behind this breakdown can lag it while a game is live. Carrying the
+    // remainder as its own line keeps the rows adding up to the number above
+    // them instead of quietly disagreeing with it.
+    var remainder = Number((player && player.points) || 0) - itemised
+    if (rows.length > 0 && Math.abs(remainder) >= .05)
+      rows.push({label: "Not yet itemised", detail: "", value: root.score(remainder)})
+    return rows
+  }
   function statRows(player) {
     var stats = player && player.stats ? player.stats : {}
     var definitions = [
@@ -250,8 +325,18 @@ Panel {
       ["Targets", "rec_tgt"], ["Receptions", "rec"], ["Receiving yards", "rec_yd"],
       ["Receiving TD", "rec_td"], ["Longest catch", "rec_lng"],
       ["Field goals", "fgm"], ["FG attempts", "fga"], ["Extra points", "xpm"], ["XP attempts", "xpa"],
+      ["Longest field goal", "fgm_lng"],
       ["Sacks", "def_sack"], ["Interceptions", "def_int"], ["Defensive TD", "def_td"],
       ["Fumbles recovered", "fum_rec"], ["Fumbles lost", "fum_lost"], ["Points allowed", "pts_allow"],
+      // A team defence is scored under its own keys, so without these every
+      // defence read as having no box score at all.
+      ["Sacks", "sack"], ["Interceptions", "int"], ["Forced fumbles", "ff"],
+      ["Safeties", "safe"], ["Blocked kicks", "blk_kick"],
+      ["Special teams TD", "def_st_td"], ["Special teams forced fumble", "def_st_ff"],
+      ["Special teams fumble recovery", "def_st_fum_rec"],
+      ["Passes defended", "def_pass_def"], ["QB hits", "qb_hit"],
+      ["Tackles", "tkl"], ["Solo tackles", "tkl_solo"], ["Assisted tackles", "tkl_ast"],
+      ["Tackles for loss", "tkl_loss"], ["Yards allowed", "yds_allow"],
       ["Snaps", "off_snp"]
     ]
     var rows = []
@@ -981,6 +1066,51 @@ Panel {
                       anchors.centerIn: parent; spacing: Style.space(2)
                       Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.value; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
                       Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; font.letterSpacing: 1 }
+                    }
+                  }
+                }
+              }
+
+              Text {
+                text: "HOW THESE POINTS WERE SCORED"; textFormat: Text.PlainText
+                color: Qt.darker(root.bar.foreground,1.5)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
+              }
+              Text {
+                width: parent.width; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+                visible: root.scoringRows(root.selectedPlayer).length === 0
+                text: "Nothing scored yet."
+                color: Qt.darker(root.bar.foreground,1.4)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+              }
+              Column {
+                width: parent.width
+                Repeater {
+                  model: root.scoringRows(root.selectedPlayer)
+                  Item {
+                    required property var modelData
+                    width: cardBody.width; height: Style.space(22)
+                    Text {
+                      id: scoringLabelText
+                      anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                      text: modelData.label; textFormat: Text.PlainText; elide: Text.ElideRight
+                      color: Qt.darker(root.bar.foreground,1.3)
+                      font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+                    }
+                    Text {
+                      anchors.left: scoringLabelText.right; anchors.leftMargin: Style.space(8)
+                      anchors.right: scoringPoints.left; anchors.rightMargin: Style.space(8)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: modelData.detail; textFormat: Text.PlainText; elide: Text.ElideRight
+                      color: Qt.darker(root.bar.foreground,1.6)
+                      font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption
+                    }
+                    Text {
+                      id: scoringPoints
+                      anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                      text: modelData.value; textFormat: Text.PlainText
+                      color: root.bar.foreground
+                      font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; font.bold: true
                     }
                   }
                 }

@@ -99,11 +99,17 @@ The score detail and colour settings are independent. For the quietest presentat
 
 Click any player in either lineup — starter or bench — to open a detail card over the panel. Click the scrim, the close button, or press Escape to dismiss it.
 
-The card shows the player's photo, position, team and jersey number, any injury designation, and three headline numbers: points this week, projection, and season average in your league's scoring. Below that sits the week's box score — only the lines that apply to the position, so a quarterback shows completions and passing yards while a defence shows sacks and points allowed — followed by season totals and player details such as age, size, college, experience, and depth-chart position.
+The card shows the player's photo, position, team and jersey number, any injury designation, and whether their game is live (`● LIVE · Q3 4:12`, with a progress rail), final, or still to come. Then three headline numbers: points this week, projection, and season average in your league's scoring.
+
+Beneath those sits **How these points were scored**, an itemised breakdown of the week's score. Each line names the rule in plain English, shows the count against your league's rate, and gives the points it earned — so a shutout reads `Shutout  1 × 10  10.0` and a quarterback's passing yards read `Passing yards  245 × 0.04  9.8`. The lines come from your league's own scoring settings multiplied by the player's actual stats, largest contributor first, so they follow any change your commissioner makes. Sleeper's per-player total stays authoritative: if a live box score briefly lags the points already awarded, the difference is carried as its own line rather than left to disagree with the number above it.
+
+Below that sits the week's box score — only the lines that apply to the position, so a quarterback shows completions and passing yards while a defence shows sacks, tackles, and yards allowed — followed by season totals and player details such as age, size, college, experience, and depth-chart position.
+
+The card reads from the current payload rather than from the row that opened it, so points, the breakdown, and the game clock keep updating while it is open.
 
 Photos come from Sleeper's public CDN (`sleepercdn.com`), the same source their own app uses, and are fetched through the plugin's existing hardened download path: https-only, size-capped, and validated by magic bytes rather than by the URL or content type, since the CDN serves PNG data from `.jpg` paths. Each photo is cached for 30 days, so a player is fetched once rather than on every viewing, and a team defence resolves to its team logo. If a photo cannot be fetched the card falls back to a position badge.
 
-Box scores and season totals come from Sleeper's stats endpoints on a max-age cache rather than on every refresh — the live scoreboard already comes from the matchups endpoint, so refetching megabytes on a 60-second live cycle would be wasteful. Both degrade to an empty result, leaving the card to show what the payload already carries.
+Box scores and season totals come from Sleeper's stats endpoints on a max-age cache. The weekly box score backs the scoring breakdown, so it tracks the live refresh closely; season totals are much larger and only feed the season average, so they are held far longer. Both degrade to an empty result, leaving the card to show what the payload already carries.
 
 ## Alerts
 

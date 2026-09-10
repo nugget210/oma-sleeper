@@ -21,6 +21,24 @@ function extractFunction(name) {
   throw new Error("unbalanced braces reading: " + name);
 }
 
+// Object-literal properties are read the same way as the functions above, by
+// balancing braces from the declaration, so the tests exercise the shipped
+// table rather than a copy that can drift from it.
+function extractObject(name) {
+  const marker = "\n  readonly property var " + name + ": (";
+  const start = QML_SOURCE.indexOf(marker);
+  if (start < 0) throw new Error("property not found in Panel.qml: " + name);
+  let depth = 0;
+  for (let i = QML_SOURCE.indexOf("{", start); i < QML_SOURCE.length; i++) {
+    if (QML_SOURCE[i] === "{") depth++;
+    else if (QML_SOURCE[i] === "}") {
+      depth--;
+      if (depth === 0) return eval("(" + QML_SOURCE.slice(QML_SOURCE.indexOf("{", start), i + 1) + ")");
+    }
+  }
+  throw new Error("unbalanced braces reading: " + name);
+}
+
 const FUNCTIONS = [
   "score", "boundedLabel", "boundedText", "soundChoice", "soundFile", "playSound",
   "playAlert", "starterPoints", "isAlertingPanel", "resetAlertWatch", "gameInResult",
@@ -30,6 +48,7 @@ const FUNCTIONS = [
   "seasonAverage", "seasonGames",
   "gameStatusText", "playerById",
   "projectedScore",
+  "scoringLabel", "scoringRate", "scoringRows",
 ];
 
 // Stand-ins for the QML objects the functions touch.
@@ -49,6 +68,8 @@ const root = {
   leadMargin: 0,
   leadWatchReady: false,
   pluginFile: (relative) => "/plugin/" + relative,
+  maxPlayersPerSection: 32,
+  scoringLabels: extractObject("scoringLabels"),
 };
 for (const name of FUNCTIONS) eval("root." + name + " = function " + extractFunction(name));
 
@@ -365,6 +386,61 @@ assert("projectedScore reports nothing when no starter is projected",
 
 assert("projectedScore tolerates a missing lineup",
   root.projectedScore(null) === null);
+
+// The scoring breakdown teaches what earned a score, so it has to reconcile
+// with the authoritative per-player total shown above it. These are the real
+// week-1 figures for the NE defence, which Sleeper itemises as
+// "0 PTS ALLOW, 2 SACK" against a 12.00 total.
+const neDefense = {
+  points: 12,
+  scoring: [{stat: "pts_allow_0", count: 1, rate: 10, points: 10},
+            {stat: "sack", count: 2, rate: 1, points: 2}],
+};
+const neRows = root.scoringRows(neDefense);
+
+assert("scoringRows itemises every scoring rule the player triggered",
+  neRows.length === 2, JSON.stringify(neRows));
+
+assert("scoringRows names a shutout in plain English",
+  neRows[0].label === "Shutout" && neRows[0].value === "10.0", JSON.stringify(neRows[0]));
+
+assert("scoringRows shows the count and the league rate",
+  neRows[0].detail === "1 × 10" && neRows[1].detail === "2 × 1",
+  neRows[0].detail + " / " + neRows[1].detail);
+
+assert("scoringRows adds up to the authoritative total",
+  neRows.reduce((sum, row) => sum + Number(row.value), 0).toFixed(1) === "12.0");
+
+assert("scoringRows carries a fractional rate without rounding it away",
+  root.scoringRows({points: 9.8, scoring: [{stat: "pass_yd", count: 245, rate: .04, points: 9.8}]})[0].detail
+    === "245 × 0.04");
+
+// A live box score can lag the score Sleeper has already awarded.
+const lagging = root.scoringRows({points: 18, scoring: [{stat: "rec_td", count: 1, rate: 6, points: 6}]});
+assert("scoringRows reconciles a lagging box score with a remainder row",
+  lagging.length === 2 && lagging[1].label === "Not yet itemised" && lagging[1].value === "12.0",
+  JSON.stringify(lagging));
+
+assert("scoringRows leaves a matching total unremarked",
+  root.scoringRows({points: 6, scoring: [{stat: "rec_td", count: 1, rate: 6, points: 6}]}).length === 1);
+
+assert("scoringRows reports nothing for a player yet to score",
+  root.scoringRows({points: 0, scoring: []}).length === 0);
+
+assert("scoringRows tolerates a player with no breakdown at all",
+  root.scoringRows(null).length === 0 && root.scoringRows({points: 4}).length === 0);
+
+assert("scoringRows drops a malformed entry",
+  root.scoringRows({points: 0, scoring: [{stat: "sack", count: "two", rate: 1, points: 2}]}).length === 0);
+
+assert("scoringLabel opens out a key it has never seen",
+  root.scoringLabel("bonus_super_special") === "Bonus super special");
+
+assert("scoringLabel keeps negative rules readable",
+  root.scoringLabel("fum_lost") === "Fumble lost" && root.scoringLabel("pass_int") === "Interception thrown");
+
+assert("scoringRate renders a whole rate without trailing zeros",
+  root.scoringRate(6) === "6" && root.scoringRate(-1) === "-1");
 
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
