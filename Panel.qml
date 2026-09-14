@@ -740,8 +740,6 @@ Panel {
             }
           }
 
-          Rectangle { width: parent.width; height: 1; color: root.bar.foreground; opacity: .12 }
-
           Column {
             visible: root.settingsOpen; width: parent.width; spacing: Style.space(12)
             Text { text: "SETTINGS"; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.4); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
