@@ -26,6 +26,7 @@ required_files=(
   tests/test-scoreboard-schema.sh
   tests/test-cache-race.sh
   tests/test-week-selection.sh
+  tests/test-game-status.sh
   tests/test-sync-state.sh
   tests/test-resource-safety.sh
 )

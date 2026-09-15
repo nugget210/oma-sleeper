@@ -384,6 +384,9 @@ readonly scoreboard_schema='def kickoff_epoch:
     and (.season.type >= 0 and .season.type <= 4)
     and (.season.year | type) == "number" and .season.year == (.season.year | floor)
     and (.season.year >= 2000 and .season.year <= 2100)
+    and (.week | type) == "object"
+    and (.week.number | type) == "number" and .week.number == (.week.number | floor)
+    and (.week.number >= 0 and .week.number <= 30)
     and (.competitions | type) == "array" and (.competitions | length) <= 4
     and all(.competitions[]; . as $competition |
       ($competition | type) == "object"
@@ -470,8 +473,11 @@ else
 fi
 
 # Sleeper owns all fantasy data. ESPN supplies only a bounded game-clock signal.
+# The window has to cover the whole round being rendered. A round rolls over on
+# the Tuesday after the previous one ends, and its Sunday games are nine days
+# out from there, so a four-day horizon left most of the round invisible.
 date_from="$(date -u -d '4 days ago' +%Y%m%d)"
-date_to="$(date -u -d '4 days' +%Y%m%d)"
+date_to="$(date -u -d '10 days' +%Y%m%d)"
 refresh_cache_or_default scoreboard \
   "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=$date_from-$date_to" \
   "$MAX_SCOREBOARD_BYTES" "$scoreboard_schema" '{"events":[]}'
@@ -517,9 +523,15 @@ jq -n \
       (0; . + (($stats[$rule.key] // 0) * $rule.value))) as $total |
       (if $total > 1000000 then 1000000 elif $total < -1000000 then -1000000 else $total end)
     end;
+  # The scoreboard window spans more than one round, so an event has to be
+  # matched on the round being rendered as well as the team. Taking the first
+  # event listed for a team returned the finished game from the round before,
+  # which read as every player having already played and scored nothing.
   def game_status($team):
     ([ $scoreboard.events[0:128][]? as $event |
-       select(($event.season.type // 0) == 2 and (($event.season.year // 0) | tostring) == ($league.season | tostring)) |
+       select(($event.season.type // 0) == 2
+         and (($event.season.year // 0) | tostring) == ($league.season | tostring)
+         and ((($event.week // {}).number // 0) == $week)) |
        $event.competitions[0:4][]? as $competition |
        $competition.competitors[0:4][]? |
        select((.team.abbreviation // "") == $team or ($team == "WAS" and .team.abbreviation == "WSH")) |

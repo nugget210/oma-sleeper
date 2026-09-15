@@ -10,7 +10,14 @@ schema_source="$(awk "/^readonly scoreboard_schema='/,/'\$/" "$repo_dir/bin/slee
 eval "$schema_source"
 
 event() {
-  printf '{"events":[{"date":%s,"season":{"type":2,"year":2026},"competitions":[{"competitors":[{"team":{"abbreviation":"SEA"}},{"team":{"abbreviation":"NE"}}],"status":{"period":1,"clock":361,"displayClock":"6:01","type":{"state":"in"}}}]}]}' "$1"
+  printf '{"events":[{"date":%s,"season":{"type":2,"year":2026},"week":{"number":%s},"competitions":[{"competitors":[{"team":{"abbreviation":"SEA"}},{"team":{"abbreviation":"NE"}}],"status":{"period":1,"clock":361,"displayClock":"6:01","type":{"state":"in"}}}]}]}' "$1" "${2:-1}"
+}
+
+# An event carries the round it belongs to. The scoreboard window spans more
+# than one round, and the payload matches a team to its game by that number, so
+# an event without it cannot be used.
+no_week() {
+  printf '{"events":[{"date":"2026-09-10T00:20Z","season":{"type":2,"year":2026},"competitions":[{"competitors":[{"team":{"abbreviation":"SEA"}}],"status":{"period":1,"clock":361,"displayClock":"6:01","type":{"state":"in"}}}]}]}'
 }
 
 check() {
@@ -25,5 +32,7 @@ check "second-precision kickoff is accepted" "$(event '"2026-09-10T00:20:00Z"')"
 check "empty scoreboard is accepted" '{"events":[]}' pass
 check "unparseable kickoff is rejected" "$(event '"not-a-date"')" fail
 check "non-string kickoff is rejected" "$(event '12345')" fail
+check "a round number is accepted" "$(event '"2026-09-10T00:20Z"' 2)" pass
+check "an event without a round number is rejected" "$(no_week)" fail
 
 echo "Scoreboard schema tests passed"
