@@ -303,7 +303,7 @@ if [[ "$mode" == photo ]]; then
 fi
 
 readonly state_schema='type == "object" and
-  ((.display_week // .week) as $week |
+  ((.week // .display_week) as $week |
     ((($week | type) == "number") and ($week == ($week | floor)) and ($week >= 1 and $week <= 18))
     or ((($week | type) == "string") and ($week | test("^[0-9]{1,2}$"))))'
 readonly league_schema='type == "object"
@@ -405,7 +405,12 @@ readonly scoreboard_schema='def kickoff_epoch:
 if [[ "$week_arg" == auto ]]; then
   cache_fetch nfl-state 300 "$api/state/nfl" "$MAX_STATE_BYTES" "$state_schema" || die "invalid week in Sleeper state"
   state_file="$CACHE_FILE"
-  remote_week="$(jq -er '.display_week // .week | if type == "number" then tostring elif type == "string" then . else error("invalid week") end' "$state_file")" \
+  # Sleeper reports two weeks. "week" is the round its matchup page has moved
+  # on to, and it advances once the previous round finishes. "display_week"
+  # lags behind it so the app can still show the completed round's scores.
+  # Following display_week left this panel a week behind the matchup the user
+  # was looking at in Sleeper, so the round is taken from "week".
+  remote_week="$(jq -er '.week // .display_week | if type == "number" then tostring elif type == "string" then . else error("invalid week") end' "$state_file")" \
     || die "invalid week in Sleeper state"
   week="$(bounded_uint "$remote_week" 1 "$MAX_WEEK" week)"
 else
