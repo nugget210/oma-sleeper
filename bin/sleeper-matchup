@@ -473,13 +473,14 @@ else
 fi
 
 # Sleeper owns all fantasy data. ESPN supplies only a bounded game-clock signal.
-# The window has to cover the whole round being rendered. A round rolls over on
-# the Tuesday after the previous one ends, and its Sunday games are nine days
-# out from there, so a four-day horizon left most of the round invisible.
-date_from="$(date -u -d '4 days ago' +%Y%m%d)"
-date_to="$(date -u -d '10 days' +%Y%m%d)"
-refresh_cache_or_default scoreboard \
-  "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=$date_from-$date_to" \
+# The round is asked for by number rather than by a date window. ESPN withdrew
+# support for date ranges, answering 400 to every "dates=from-to" request, and a
+# window was always the wrong shape for the question: it had to be wide enough
+# to reach a round that begins nine days out, which then dragged in the previous
+# round as well. A week query returns exactly the round being rendered.
+# The cache key carries the round so one round cannot serve another.
+refresh_cache_or_default "scoreboard-$season-$week" \
+  "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&week=$week&seasontype=2&year=$season" \
   "$MAX_SCOREBOARD_BYTES" "$scoreboard_schema" '{"events":[]}'
 scoreboard_file="$CACHE_FILE"
 now_ms="$(( $(date +%s) * 1000 ))"

@@ -35,4 +35,21 @@ check "non-string kickoff is rejected" "$(event '12345')" fail
 check "a round number is accepted" "$(event '"2026-09-10T00:20Z"' 2)" pass
 check "an event without a round number is rejected" "$(no_week)" fail
 
+# ESPN withdrew date-range support, answering 400 to every "dates=from-to"
+# request. That failure is silent: the fetch falls back to an empty scoreboard,
+# every player reports no game, and the panel quietly loses live detection. The
+# round is asked for by number instead, and nothing may reintroduce a range.
+grep -q 'week=$week&seasontype=2&year=$season' "$repo_dir/bin/sleeper-matchup" \
+  || { echo "FAIL  the scoreboard must be requested by round number" >&2; exit 1; }
+echo "PASS  the scoreboard is requested by round number"
+
+grep -qE '^[^#]*scoreboard\?[^"]*dates=' "$repo_dir/bin/sleeper-matchup" \
+  && { echo "FAIL  a scoreboard date range would be rejected by ESPN" >&2; exit 1; }
+echo "PASS  no scoreboard date range is requested"
+
+# One round must not be served the cache of another.
+grep -q 'refresh_cache_or_default "scoreboard-$season-$week"' "$repo_dir/bin/sleeper-matchup" \
+  || { echo "FAIL  the scoreboard cache key must carry season and round" >&2; exit 1; }
+echo "PASS  the scoreboard cache key carries the round"
+
 echo "Scoreboard schema tests passed"
