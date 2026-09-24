@@ -50,6 +50,7 @@ const FUNCTIONS = [
   "gameStatusText", "playerById",
   "projectedScore",
   "scoringLabel", "scoringRate", "scoringRows",
+  "opponentFor", "calculateMatchupState",
 ];
 
 const ROW_FUNCTIONS = ["paceAgainst"];
@@ -484,6 +485,51 @@ assert("paceAgainst bounds progress to the game",
 
 assert("paceAgainst treats a missing score as none scored",
   row.paceAgainst(null, 20, 1) === -1 && row.paceAgainst(undefined, 20, 0) === 2);
+
+// Sleeper leaves matchup_id null for a roster with no matchup that week: a bye,
+// an odd league, or a side outside the bracket once the playoffs begin. Two
+// such rosters both hold null, so matching on equality alone paired them with
+// each other and showed a matchup that is not being played.
+root.data = {games: [
+  {roster_id: 3, matchup_id: null},
+  {roster_id: 7, matchup_id: null},
+  {roster_id: 1, matchup_id: 2},
+  {roster_id: 4, matchup_id: 2},
+]};
+
+assert("opponentFor pairs rosters that share a matchup",
+  root.opponentFor({roster_id: 1, matchup_id: 2}).roster_id === 4);
+
+assert("opponentFor reports no opponent for an unpaired roster",
+  root.opponentFor({roster_id: 3, matchup_id: null}) === null);
+
+assert("opponentFor does not pair two unpaired rosters with each other",
+  root.opponentFor(root.data.games[0]) === null
+    && root.opponentFor(root.data.games[1]) === null);
+
+assert("opponentFor treats an absent matchup id as unpaired",
+  root.opponentFor({roster_id: 3}) === null);
+
+assert("opponentFor tolerates a missing game or payload",
+  root.opponentFor(null) === null);
+root.data = null;
+assert("opponentFor tolerates an empty payload",
+  root.opponentFor({roster_id: 1, matchup_id: 2}) === null);
+
+// The bar still reports a live game when only one lineup is on screen.
+function lineupOf(states) {
+  return {starters: states.map(s => ({game_status: {state: s}}))};
+}
+assert("matchup state follows a lone lineup when there is no opponent",
+  root.calculateMatchupState(lineupOf(["in", "pre"]), null) === "live");
+assert("a lone lineup yet to play reports upcoming",
+  root.calculateMatchupState(lineupOf(["pre", "pre"]), null) === "upcoming");
+assert("a lone lineup that has finished reports final",
+  root.calculateMatchupState(lineupOf(["post"]), null) === "final");
+assert("two lineups are still combined",
+  root.calculateMatchupState(lineupOf(["pre"]), lineupOf(["in"])) === "live");
+assert("no lineups at all reports idle",
+  root.calculateMatchupState(null, null) === "idle");
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");

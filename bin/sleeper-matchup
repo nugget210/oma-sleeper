@@ -304,7 +304,7 @@ fi
 
 readonly state_schema='type == "object" and
   ((.week // .display_week) as $week |
-    ((($week | type) == "number") and ($week == ($week | floor)) and ($week >= 1 and $week <= 18))
+    ((($week | type) == "number") and ($week == ($week | floor)) and ($week >= 0 and $week <= 30))
     or ((($week | type) == "string") and ($week | test("^[0-9]{1,2}$"))))'
 readonly league_schema='type == "object"
   and length <= 256
@@ -415,7 +415,16 @@ if [[ "$week_arg" == auto ]]; then
   # was looking at in Sleeper, so the round is taken from "week".
   remote_week="$(jq -er '.week // .display_week | if type == "number" then tostring elif type == "string" then . else error("invalid week") end' "$state_file")" \
     || die "invalid week in Sleeper state"
-  week="$(bounded_uint "$remote_week" 1 "$MAX_WEEK" week)"
+    # Sleeper reports a week outside the fantasy season at both ends: zero
+    # before the season opens, and a rising number through the postseason once
+    # it closes. Requiring the week to fall inside the season failed the whole
+    # refresh on both, which surfaced as a connection error. The week is clamped
+    # into range instead, so the panel settles on the nearest week it can
+    # render; a league with no matchup there then says so plainly.
+    [[ "$remote_week" =~ ^[0-9]{1,4}$ ]] || die "invalid week in Sleeper state"
+    week=$((10#$remote_week))
+    (( week < 1 )) && week=1
+    (( week > MAX_WEEK )) && week=$MAX_WEEK
 else
   week="$week_arg"
 fi

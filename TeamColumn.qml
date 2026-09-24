@@ -11,9 +11,14 @@ Column {
   property var bar: null
   property string colorMode: "theme"
   property string playerDisplayMode: "full"
+  // A team can be shown without an opponent: a bye, an odd league, or a side
+  // eliminated before the league's final week. There is nothing to lead or
+  // trail in that case, so the comparison rail and the direction arrows are
+  // suppressed rather than comparing the score against a standing zero.
+  property bool hasOpponent: true
   signal playerActivated(var player)
   readonly property bool plainScores: playerDisplayMode === "scores"
-  readonly property bool hasScore: teamScore > 0 || opponentScore > 0
+  readonly property bool hasScore: hasOpponent && (teamScore > 0 || opponentScore > 0)
   readonly property bool leading: hasScore && teamScore > opponentScore
   readonly property bool trailing: hasScore && teamScore < opponentScore
   readonly property bool hasProjectedScore: projectedScore !== null && isFinite(Number(projectedScore))
@@ -24,8 +29,8 @@ Column {
   spacing: Style.space(8)
 
   Rectangle {
-    width: parent.width; height: root.plainScores ? 0 : Style.space(3); radius: height/2
-    visible: !root.plainScores
+    width: parent.width; height: root.plainScores || !root.hasOpponent ? 0 : Style.space(3); radius: height/2
+    visible: !root.plainScores && root.hasOpponent
     color: Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.08)
     Rectangle { width: parent.width * root.share; height: parent.height; radius: height/2; color: root.colorMode === "minimal" ? root.bar.foreground : root.emphasis; opacity: root.hasScore ? 1 : .35 }
   }

@@ -58,9 +58,11 @@ Panel {
   readonly property string opponentShort: opponentLabel || abbreviation(opponentName)
   readonly property string matchupState: calculateMatchupState(myGame, opponentGame)
   readonly property string barStatusSuffix: matchupState === "live" ? " · ● LIVE" : (matchupState === "upcoming" ? " · UPCOMING" : "")
+  readonly property bool hasOpponent: Boolean(myGame && opponentGame)
   readonly property string barText: leagueId === "" ? "NFL SETUP" : (loading && !data ? "NFL …" :
-    (myGame && opponentGame ? (shortName || "MY") + " " + score(myGame.points) + " – " + score(opponentGame.points) + " " + opponentShort + barStatusSuffix : "NFL SETUP"))
-  readonly property bool hasLiveScore: myGame && opponentGame && (Number(myGame.points) > 0 || Number(opponentGame.points) > 0)
+    (hasOpponent ? (shortName || "MY") + " " + score(myGame.points) + " – " + score(opponentGame.points) + " " + opponentShort + barStatusSuffix
+     : (myGame ? (shortName || "MY") + " " + score(myGame.points) + " · NO MATCHUP" + barStatusSuffix : "NFL SETUP")))
+  readonly property bool hasLiveScore: hasOpponent && (Number(myGame.points) > 0 || Number(opponentGame.points) > 0)
   readonly property color positiveColor: colorMode === "performance" ? "#86b875" : Color.accent
   readonly property color negativeColor: colorMode === "performance" ? Color.urgent : Color.muted
   readonly property color barColor: colorMode === "minimal" || !hasLiveScore ? (bar ? bar.foreground : Color.foreground) :
@@ -459,8 +461,8 @@ Panel {
   }
 
   function calculateMatchupState(first, second) {
-    if (!first || !second) return "idle"
-    var players = (first.starters || []).concat(second.starters || [])
+    if (!first && !second) return "idle"
+    var players = ((first || {}).starters || []).concat((second || {}).starters || [])
     var live = 0, upcoming = 0, completed = 0
     for (var i = 0; i < players.length; i++) {
       var state = players[i].game_status ? players[i].game_status.state : "idle"
@@ -479,9 +481,15 @@ Panel {
     return null
   }
   function opponentFor(game) {
-    if (!game || !data) return null
-    for (var i=0; i<data.games.length; i++)
-      if (data.games[i].matchup_id === game.matchup_id && data.games[i].roster_id !== game.roster_id) return data.games[i]
+    if (!game || !root.data || !root.data.games) return null
+    // Sleeper leaves matchup_id null for a roster with no matchup that week: a
+    // bye, an odd league, or a side outside the bracket once the playoffs
+    // begin. Two such rosters both hold null, so matching on equality paired
+    // them with each other and invented a matchup that is not being played.
+    if (game.matchup_id === null || game.matchup_id === undefined) return null
+    for (var i=0; i<root.data.games.length; i++)
+      if (root.data.games[i].matchup_id === game.matchup_id
+          && root.data.games[i].roster_id !== game.roster_id) return root.data.games[i]
     return null
   }
   function teamName(id) {
@@ -895,11 +903,22 @@ Panel {
 
           Text { visible: root.errorText !== ""; text: root.errorText; textFormat: Text.PlainText; color: "#ef5350"; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
 
+          // An empty half of the panel needs saying out loud. Sleeper leaves a
+          // roster unpaired for a bye, for an odd league, and for a side that
+          // did not reach the bracket once the playoffs begin.
+          Text {
+            visible: !root.settingsOpen && Boolean(root.myGame) && !root.hasOpponent
+            width: parent.width; wrapMode: Text.WordWrap
+            text: "No matchup this week — showing your lineup only."
+            textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.4)
+            font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+          }
+
           Row {
-            visible: !root.settingsOpen && root.myGame && root.opponentGame
+            visible: !root.settingsOpen && Boolean(root.myGame)
             width: parent.width; spacing: Style.space(16)
-            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; projectedScore: root.projectedScore(root.myGame); opponentScore: root.opponentGame ? root.opponentGame.points : 0; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode; onPlayerActivated: function(player) { root.showPlayer(player) } }
-            TeamColumn { width: (parent.width-parent.spacing)/2; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; projectedScore: root.projectedScore(root.opponentGame); opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode; onPlayerActivated: function(player) { root.showPlayer(player) } }
+            TeamColumn { width: root.hasOpponent ? (parent.width-parent.spacing)/2 : parent.width; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; projectedScore: root.projectedScore(root.myGame); opponentScore: root.opponentGame ? root.opponentGame.points : 0; hasOpponent: root.hasOpponent; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode; onPlayerActivated: function(player) { root.showPlayer(player) } }
+            TeamColumn { visible: root.hasOpponent; width: root.hasOpponent ? (parent.width-parent.spacing)/2 : 0; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; projectedScore: root.projectedScore(root.opponentGame); opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode; onPlayerActivated: function(player) { root.showPlayer(player) } }
           }
         }
       }
