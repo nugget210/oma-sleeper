@@ -10,7 +10,7 @@ repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 helper="$repo_dir/bin/sleeper-matchup"
 
 defs="$(awk '/^  def short_text\(/{f=1} f&&/^  def teamname\(/{exit} f' "$helper")
-$(awk '/^  def game_status\(\$team\):/{f=1} f&&/^  def league_points\(/{exit} f' "$helper")"
+$(awk '/^  def kickoff_epoch\(/{f=1} f&&/^  def league_points\(/{exit} f' "$helper")"
 [[ "$defs" == *"game_status"* && "$defs" == *"short_text"* ]] \
   || { echo "could not extract the game-status definitions" >&2; exit 1; }
 

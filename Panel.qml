@@ -44,6 +44,9 @@ Panel {
   readonly property var selectedPlayer: root.playerById(root.selectedPlayerId)
   property string photoPath: ""
   property double lastHeartbeatMs: Date.now()
+  // Re-read each minute by the heartbeat below, so a countdown ticks down
+  // without any extra timer and without fetching anything.
+  property double nowMs: Date.now()
   // When data last arrived, from this panel or from a sibling. A secondary
   // panel reads it to tell whether anyone is still fetching.
   property double lastDataMs: 0
@@ -89,7 +92,12 @@ Panel {
   readonly property string opponentName: opponentLabel || (ownOpponentGame ? teamName(ownOpponentGame.roster_id) : "OPP")
   readonly property string opponentShort: opponentLabel || abbreviation(opponentName)
   readonly property string matchupState: calculateMatchupState(ownGame, ownOpponentGame)
-  readonly property string barStatusSuffix: matchupState === "live" ? " · ● LIVE" : (matchupState === "upcoming" ? " · UPCOMING" : "")
+  readonly property double nextKickoffMs: nextStarterKickoff(ownGame)
+  readonly property string countdownText: countdownTo(nextKickoffMs, nowMs)
+  // A live game outranks a countdown. Once nothing is left to play the suffix
+  // falls away, as it did before.
+  readonly property string barStatusSuffix: matchupState === "live" ? " · ● LIVE"
+    : (matchupState === "upcoming" ? (countdownText !== "" ? " · " + countdownText : " · UPCOMING") : "")
   readonly property bool hasOpponent: Boolean(myGame && opponentGame)
   readonly property bool ownHasOpponent: Boolean(ownGame && ownOpponentGame)
   readonly property string barText: leagueId === "" ? "NFL SETUP" : (loading && !data ? "NFL …" :
@@ -259,7 +267,12 @@ Panel {
       return "● LIVE" + (period > 0 ? " · Q" + period : "") + (clock === "" ? "" : " " + clock)
     }
     if (status.state === "post") return "FINAL"
-    if (status.state === "pre") return "YET TO PLAY"
+    if (status.state === "pre") {
+      // The kickoff time is the more useful answer when it is known; the
+      // generic wording stays for a game with no time attached to it.
+      var kickoff = root.kickoffText(player)
+      return kickoff !== "" ? kickoff : "YET TO PLAY"
+    }
     return ""
   }
   function showPlayer(player) {
@@ -586,6 +599,44 @@ Panel {
     root.viewedRosterId = Number(rosterId) || 0
     root.showView("matchup")
   }
+  // The earliest kickoff still ahead among a lineup's starters. Bench players
+  // are left out: their game does not move the score, and an earlier bench
+  // kickoff would count down to a game with no bearing on the matchup.
+  function nextStarterKickoff(game) {
+    if (!game || !game.starters) return 0
+    var soonest = 0
+    for (var i = 0; i < game.starters.length; i++) {
+      var status = game.starters[i].game_status
+      if (!status || status.state !== "pre") continue
+      var kickoff = Number(status.kickoff)
+      if (!isFinite(kickoff) || kickoff <= 0) continue
+      if (soonest === 0 || kickoff < soonest) soonest = kickoff
+    }
+    return soonest * 1000
+  }
+  // Two units at most, and the smaller is dropped as it stops mattering: days
+  // and hours far out, hours and minutes on the day, minutes in the last hour.
+  function countdownTo(targetMs, fromMs) {
+    if (!targetMs || targetMs <= 0) return ""
+    var seconds = Math.floor((targetMs - fromMs) / 1000)
+    if (seconds <= 0) return ""
+    var days = Math.floor(seconds / 86400)
+    var hours = Math.floor((seconds % 86400) / 3600)
+    var minutes = Math.floor((seconds % 3600) / 60)
+    if (days > 0) return days + "d " + hours + "h"
+    if (hours > 0) return hours + "h " + minutes + "m"
+    return Math.max(1, minutes) + "m"
+  }
+  // The clock time one player kicks off. A countdown is the right thing in the
+  // bar, where an absolute hour invites being misread; here the reader is
+  // looking at a single game and wants to know when to watch it.
+  function kickoffText(player) {
+    var status = player && player.game_status ? player.game_status : null
+    if (!status || status.state !== "pre") return ""
+    var kickoff = Number(status.kickoff)
+    if (!isFinite(kickoff) || kickoff <= 0) return ""
+    return Qt.formatDateTime(new Date(kickoff * 1000), "ddd h:mm AP").toUpperCase()
+  }
   function gameFor(id) {
     if (!data || !data.games) return null
     for (var i=0; i<data.games.length; i++) if (data.games[i].roster_id === id) return data.games[i]
@@ -832,6 +883,7 @@ Panel {
     onDateChanged: {
       var now = Date.now()
       // A large wall-clock jump means suspend/resume or a stalled session.
+      root.nowMs = now
       if (now - root.lastHeartbeatMs > 150000) root.refreshIfDue()
       root.lastHeartbeatMs = now
     }

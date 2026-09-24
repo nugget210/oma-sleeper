@@ -54,6 +54,7 @@ const FUNCTIONS = [
   "isPrimaryPanel", "refreshIfDue", "refreshIfAbandoned",
   "buildLeagueMatchups", "buildLeagueStandings", "recordText", "viewMatchup",
   "showView", "gameFor", "saveEntry",
+  "countdownTo", "nextStarterKickoff", "kickoffText",
 ];
 
 const ROW_FUNCTIONS = ["paceAgainst"];
@@ -763,6 +764,76 @@ assert("the saved name is trimmed and bounded",
 
 root.hostWidget = null;
 root.settings = {};
+
+// The bar counts down to the next game one of the user's starters is in. Two
+// units at most, and the smaller is dropped as it stops mattering.
+const T0 = 1000000000000;
+const inS = s => root.countdownTo(T0 + s * 1000, T0);
+
+assert("a countdown days out reads days and hours",
+  inS(3 * 86400 + 14 * 3600 + 57 * 60) === "3d 14h");
+assert("a countdown on the day reads hours and minutes",
+  inS(14 * 3600 + 57 * 60) === "14h 57m");
+assert("a countdown in the last hour reads minutes alone",
+  inS(57 * 60) === "57m");
+assert("a countdown never reads zero while the game is still ahead",
+  inS(30) === "1m");
+assert("a whole number of days still carries the hours",
+  inS(2 * 86400) === "2d 0h");
+assert("a kickoff already past reads as nothing",
+  inS(-60) === "" && inS(0) === "");
+assert("countdownTo reports nothing without a kickoff",
+  root.countdownTo(0, T0) === "" && root.countdownTo(null, T0) === "");
+
+// Only starters count. A bench player kicking off earlier does not move the
+// score, so counting down to their game would answer the wrong question.
+function kickoffLineup(starters, bench) {
+  return {starters: starters, bench: bench || []};
+}
+function kickoffStarter(state, kickoff) {
+  return {game_status: {state: state, kickoff: kickoff}};
+}
+const base = 1790000000;
+
+assert("the countdown uses the earliest starter still to play",
+  root.nextStarterKickoff(kickoffLineup([
+    kickoffStarter("pre", base + 500), kickoffStarter("pre", base + 100), kickoffStarter("pre", base + 900),
+  ])) === (base + 100) * 1000);
+
+assert("a starter already playing is not counted down to",
+  root.nextStarterKickoff(kickoffLineup([
+    kickoffStarter("in", base + 10), kickoffStarter("pre", base + 400),
+  ])) === (base + 400) * 1000);
+
+assert("a finished starter is not counted down to",
+  root.nextStarterKickoff(kickoffLineup([
+    kickoffStarter("post", base + 10), kickoffStarter("pre", base + 400),
+  ])) === (base + 400) * 1000);
+
+assert("a bench player kicking off sooner is ignored",
+  root.nextStarterKickoff(kickoffLineup(
+    [kickoffStarter("pre", base + 900)],
+    [kickoffStarter("pre", base + 1)],
+  )) === (base + 900) * 1000);
+
+assert("a lineup with nothing left to play has no kickoff",
+  root.nextStarterKickoff(kickoffLineup([kickoffStarter("post", base), kickoffStarter("in", base)])) === 0);
+
+assert("a starter with no kickoff time is skipped",
+  root.nextStarterKickoff(kickoffLineup([
+    kickoffStarter("pre", null), kickoffStarter("pre", 0), kickoffStarter("pre", base + 7),
+  ])) === (base + 7) * 1000);
+
+assert("nextStarterKickoff tolerates a missing lineup",
+  root.nextStarterKickoff(null) === 0 && root.nextStarterKickoff({}) === 0);
+
+// The card shows a clock time only for a game still to come.
+assert("a player already playing shows no kickoff time",
+  root.kickoffText(kickoffStarter("in", base)) === "");
+assert("a finished player shows no kickoff time",
+  root.kickoffText(kickoffStarter("post", base)) === "");
+assert("kickoffText tolerates a missing player",
+  root.kickoffText(null) === "" && root.kickoffText({}) === "");
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");
