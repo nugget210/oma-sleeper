@@ -18,7 +18,17 @@ Panel {
   // is still polling, so it is timestamped wherever it came from.
   onDataChanged: root.lastDataMs = Date.now()
   property string errorText: ""
-  property bool settingsOpen: false
+  // Which body the panel is showing. A second alternate view made a pair of
+  // booleans able to contradict each other, so the panel names one view at a
+  // time: "matchup", "league" or "settings".
+  property string view: "matchup"
+  readonly property bool settingsOpen: view === "settings"
+  readonly property bool leagueOpen: view === "league"
+  readonly property bool matchupOpen: view === "matchup"
+  function showView(name) {
+    root.view = name === "league" || name === "settings" ? name : "matchup"
+  }
+  function toggleSettings() { root.showView(root.settingsOpen ? "matchup" : "settings") }
   property bool loading: false
   property string settingsMessage: ""
   property bool forceMetadataRefresh: false
@@ -538,8 +548,8 @@ Panel {
     loading = true; errorText = ""
     fetchProc.running = true
   }
-  function open() { if (leagueId === "") settingsOpen = true; controller.show(); refresh(false) }
-  function close() { settingsOpen = false; controller.hide() }
+  function open() { if (leagueId === "") root.showView("settings"); controller.show(); refresh(false) }
+  function close() { root.showView("matchup"); controller.hide() }
   // Persist the settings entry. Every value is read from live panel state, and
   // `changes` overrides only the keys a caller is actually changing, so adding a
   // setting never means threading another argument through every call site.
@@ -778,7 +788,7 @@ Panel {
                   required property var modelData; required property int index
                   width: Style.space(28); height: width; radius: Style.cornerRadius; color: area.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent"
                   Text { anchors.centerIn: parent; text: modelData.icon; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
-                  MouseArea { id: area; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { if (index===0) root.settingsOpen=!root.settingsOpen; else if(index===1) root.openSleeper(); else root.refresh(true) } }
+                  MouseArea { id: area; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { if (index===0) root.toggleSettings(); else if(index===1) root.openSleeper(); else root.refresh(true) } }
                 }
               }
             }
@@ -933,7 +943,7 @@ Panel {
             Rectangle {
               width: Style.space(90); height: Style.space(32); radius: Style.cornerRadius; color: saveArea.containsMouse ? Color.accent : Style.hoverFillFor(root.bar.foreground, Color.accent)
               Text { anchors.centerIn: parent; text: "Save"; textFormat: Text.PlainText; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body }
-              MouseArea { id: saveArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.persist(root.selectedRosterId); root.settingsOpen=false } }
+              MouseArea { id: saveArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.persist(root.selectedRosterId); root.showView("matchup") } }
             }
           }
 
@@ -943,7 +953,7 @@ Panel {
           // roster unpaired for a bye, for an odd league, and for a side that
           // did not reach the bracket once the playoffs begin.
           Text {
-            visible: !root.settingsOpen && Boolean(root.myGame) && !root.hasOpponent
+            visible: root.matchupOpen && Boolean(root.myGame) && !root.hasOpponent
             width: parent.width; wrapMode: Text.WordWrap
             text: "No matchup this week — showing your lineup only."
             textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.4)
@@ -951,7 +961,7 @@ Panel {
           }
 
           Row {
-            visible: !root.settingsOpen && Boolean(root.myGame)
+            visible: root.matchupOpen && Boolean(root.myGame)
             width: parent.width; spacing: Style.space(16)
             TeamColumn { width: root.hasOpponent ? (parent.width-parent.spacing)/2 : parent.width; teamName: root.teamName(root.myGame ? root.myGame.roster_id : 0); teamScore: root.myGame ? root.myGame.points : 0; projectedScore: root.projectedScore(root.myGame); opponentScore: root.opponentGame ? root.opponentGame.points : 0; hasOpponent: root.hasOpponent; game: root.myGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode; onPlayerActivated: function(player) { root.showPlayer(player) } }
             TeamColumn { visible: root.hasOpponent; width: root.hasOpponent ? (parent.width-parent.spacing)/2 : 0; teamName: root.teamName(root.opponentGame ? root.opponentGame.roster_id : 0); teamScore: root.opponentGame ? root.opponentGame.points : 0; projectedScore: root.projectedScore(root.opponentGame); opponentScore: root.myGame ? root.myGame.points : 0; game: root.opponentGame; bar: root.bar; colorMode: root.colorMode; playerDisplayMode: root.playerDisplayMode; onPlayerActivated: function(player) { root.showPlayer(player) } }
