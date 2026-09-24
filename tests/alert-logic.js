@@ -53,7 +53,7 @@ const FUNCTIONS = [
   "opponentFor", "calculateMatchupState",
   "isPrimaryPanel", "refreshIfDue", "refreshIfAbandoned",
   "buildLeagueMatchups", "buildLeagueStandings", "recordText", "viewMatchup",
-  "showView", "gameFor",
+  "showView", "gameFor", "saveEntry",
 ];
 
 const ROW_FUNCTIONS = ["paceAgainst"];
@@ -61,6 +61,8 @@ const ROW_FUNCTIONS = ["paceAgainst"];
 // Stand-ins for the QML objects the functions touch.
 const alertProc = { running: false, soundPath: "" };
 // Stand-ins for the scheduled-refresh machinery.
+const labelField = { text: "ME" };
+const opponentField = { text: "THEM" };
 const standbyTimer = { running: false, restarted: 0, restart() { this.running = true; this.restarted++ } };
 const notifyProc = { running: false, summary: "", body: "" };
 const root = {
@@ -699,6 +701,68 @@ assert("showView accepts the league view",
 assert("showView accepts settings",
   (root.showView("settings"), root.view === "settings"));
 root.view = "matchup";
+
+// Saving has to reach the file and the panels already on screen. The fan-out
+// walks the bar's live widget list, which can still point at a surface being
+// torn down while the bars rebuild. When it did, the panel being typed into
+// never heard about its own save: the file was right and the bar kept the old
+// name. The host widget is known without that list, so it is told directly.
+function savingPanel(opts) {
+  const o = opts || {};
+  const host = {delivered: [], published: []};
+  if (o.receive !== false) host.receiveSettings = e => host.delivered.push(e);
+  if (o.publish !== false) host.publishSettings = e => {
+    // A stale list is one that no longer contains this panel's own widget.
+    (o.siblings === undefined ? [host] : o.siblings).forEach(w => {
+      if (w && typeof w.receiveSettings === "function") w.receiveSettings(e);
+    });
+    host.published.push(e);
+  };
+  root.hostWidget = o.host === null ? null : host;
+  root.settings = {};
+  root.bar = null;
+  labelField.text = "ME";
+  opponentField.text = o.opponent === undefined ? "JAY" : o.opponent;
+  root.saveEntry({});
+  return host;
+}
+
+let host = savingPanel({});
+assert("a save reaches this panel's own widget directly",
+  host.delivered.length >= 1 && host.delivered[0].opponentName === "JAY",
+  JSON.stringify(host.delivered));
+assert("a save still fans out to the other screens",
+  host.published.length === 1);
+
+// The reported failure: the list no longer contains this panel's widget.
+host = savingPanel({siblings: [{receiveSettings: () => {}}]});
+assert("a save reaches this panel even when the widget list has gone stale",
+  host.delivered.length === 1 && host.delivered[0].opponentName === "JAY",
+  JSON.stringify(host.delivered));
+
+// An empty list is the same failure in its most complete form.
+host = savingPanel({siblings: []});
+assert("a save reaches this panel even when the widget list is empty",
+  host.delivered.length === 1);
+
+// Without a host there is nothing to deliver to, so the panel keeps its own.
+savingPanel({host: null});
+assert("a panel with no host applies the save to itself",
+  root.settings.opponentName === "JAY", JSON.stringify(root.settings));
+
+// A host that cannot receive is the old fallback, and must still apply.
+savingPanel({receive: false, publish: false});
+assert("a host that cannot receive falls back to applying it locally",
+  root.settings.opponentName === "JAY");
+
+// The entry carries what was typed, bounded the same as before.
+host = savingPanel({opponent: "  A Very Long Opposition Name Indeed  "});
+assert("the saved name is trimmed and bounded",
+  host.delivered[0].opponentName === "A Very Long Opposition N",
+  host.delivered[0].opponentName);
+
+root.hostWidget = null;
+root.settings = {};
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");

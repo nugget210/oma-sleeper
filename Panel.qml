@@ -648,9 +648,23 @@ Panel {
     entry.scoreSound = root.soundChoice(entry.scoreSound)
     entry.leadAlert = entry.leadAlert === true
     entry.notifyAlerts = entry.notifyAlerts === true
-    if (root.hostWidget && typeof root.hostWidget.publishSettings === "function")
-      root.hostWidget.publishSettings(entry)
-    else root.settings = entry
+    // A save has to reach two places: the file, and the panels already on
+    // screen. The fan-out below walks the bar's live widget list, which can
+    // still point at a surface being torn down while the bars are rebuilt.
+    // When it does, the panel being typed into never hears about its own
+    // save: the file on disk is correct and the bar keeps the old value.
+    // The host widget for this panel is known without consulting that list,
+    // so it is told directly first. Assigning root.settings here instead
+    // would break the binding the host installs and cut this panel off from
+    // every later update, so the direct assignment stays the last resort.
+    var host = root.hostWidget
+    var delivered = false
+    if (host && typeof host.receiveSettings === "function") {
+      host.receiveSettings(entry)
+      delivered = true
+    }
+    if (host && typeof host.publishSettings === "function") host.publishSettings(entry)
+    if (!delivered) root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
