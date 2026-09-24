@@ -46,6 +46,8 @@ omarchy plugin remove nugget210.oma-sleeper
 - **Pace arrows** — once a game is a tenth played, `▲` / `●` / `▼` show whether a starter is running above, on, or below the share of their projection the game has reached.
 - **Scoring breakdown** — the player card itemises what earned the points, in plain English, against your league's own scoring rules.
 - **Alerts** — optional sounds and desktop notifications for scoring plays and lead changes.
+- **The whole league** — a LEAGUE tab lists every matchup in the league with both scores and a live marker, above a standings table. Select any matchup to open it in the full scoreboard.
+- **Countdown to kickoff** — the bar counts down to the next game one of your starters is in: `3d 14h`, then `14h 57m`, then `57m`. A live game takes precedence.
 - **Adaptive refresh** — 60 seconds while a game is live, 5 minutes when kickoff is within three hours, 15 minutes otherwise, and immediately when the panel opens or the machine wakes.
 
 ## The player card
@@ -58,12 +60,20 @@ Click any player or defence in either lineup — starter or bench — to open th
 |---|---|
 | **Headline numbers** | Points this week, projection, and season average in your league's scoring. |
 | **How these points were scored** | One line per scoring rule the player triggered, showing the count against your league's rate and the points it produced — `Shutout 1 × 10 → 10.0`, `Passing yards 245 × 0.04 → 9.8`. Derived from your league's settings, so it follows any change your commissioner makes. |
-| **Game status** | `● LIVE · Q3 4:12` with a progress rail, or `FINAL`, or `YET TO PLAY`. |
+| **Game status** | `● LIVE · Q3 4:12` with a progress rail, `FINAL`, or the kickoff time for a game still to come. |
 | **This week** | The box score lines that apply to the position — completions and passing yards for a quarterback, sacks and yards allowed for a defence. |
 | **Season** | Games played and total points in your league's scoring. |
 | **Player** | Age, size, college, experience, and depth-chart position. |
 
 Photos come from Sleeper's public CDN, cached for 30 days, with a team defence resolving to its team logo and a position badge as fallback.
+
+## The league
+
+The **LEAGUE** tab shows every matchup in your league at once — both scores, and a dot that fills in while a game is live — with your own matchup first and marked. Selecting a row opens that matchup in the full scoreboard, with the same lineups, clocks, projections and player cards; a banner names whose game you are viewing and offers the way back.
+
+Below the matchups sits the standings table, ordered by record and broken on points scored. It comes from the league rosters, so it needs no extra request and no history to be kept.
+
+Your own matchup still governs the bar, the score alerts and the lead-change alert, whichever matchup happens to be on screen.
 
 ## Options
 
