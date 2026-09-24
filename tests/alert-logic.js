@@ -51,12 +51,15 @@ const FUNCTIONS = [
   "projectedScore",
   "scoringLabel", "scoringRate", "scoringRows",
   "opponentFor", "calculateMatchupState",
+  "isPrimaryPanel", "refreshIfDue", "refreshIfAbandoned",
 ];
 
 const ROW_FUNCTIONS = ["paceAgainst"];
 
 // Stand-ins for the QML objects the functions touch.
 const alertProc = { running: false, soundPath: "" };
+// Stand-ins for the scheduled-refresh machinery.
+const standbyTimer = { running: false, restarted: 0, restart() { this.running = true; this.restarted++ } };
 const notifyProc = { running: false, summary: "", body: "" };
 const root = {
   maxLabelLength: 24,
@@ -530,6 +533,88 @@ assert("two lineups are still combined",
   root.calculateMatchupState(lineupOf(["pre"]), lineupOf(["in"])) === "live");
 assert("no lineups at all reports idle",
   root.calculateMatchupState(null, null) === "idle");
+
+// A bar surface is built per monitor, so this panel exists once per screen.
+// Left alone, every screen polled the API on its own timer: three machines'
+// worth of traffic for one league, and the overlapping writes that caused the
+// cache-snapshot race. Only the primary polls; its result reaches the rest.
+function panelAt(index, count) {
+  const widgets = [];
+  for (let i = 0; i < count; i++) widgets.push({name: "w" + i});
+  root.hostWidget = Object.assign(widgets[index], {siblingWidgets: () => widgets});
+  return widgets;
+}
+let fetched = 0;
+function scheduled(opts) {
+  const o = opts || {};
+  root.leagueId = o.leagueId === undefined ? "123" : o.leagueId;
+  root.lastDataMs = o.lastDataMs || 0;
+  root.adaptiveIntervalMs = o.interval || 60000;
+  standbyTimer.running = false;
+  standbyTimer.restarted = 0;
+  fetched = 0;
+  root.refresh = () => { fetched++ };
+  root.refreshIfDue();
+  return {fetched: fetched, waiting: standbyTimer.restarted};
+}
+function afterWaiting(opts) {
+  scheduled(opts);
+  fetched = 0;
+  root.refreshIfAbandoned();
+  return fetched;
+}
+
+panelAt(0, 3);
+assert("the primary panel is the first live widget", root.isPrimaryPanel() === true);
+panelAt(2, 3);
+assert("another screen's panel is not primary", root.isPrimaryPanel() === false);
+root.hostWidget = null;
+assert("a lone panel with no siblings is primary", root.isPrimaryPanel() === true);
+root.hostWidget = {siblingWidgets: () => []};
+assert("a panel is primary when no widgets are listed", root.isPrimaryPanel() === true);
+
+panelAt(0, 3);
+assert("the primary panel polls on schedule",
+  scheduled({lastDataMs: Date.now()}).fetched === 1);
+
+// A secondary never polls on the scheduled tick: it only asks to look again.
+panelAt(2, 3);
+const tick = scheduled({lastDataMs: Date.now()});
+assert("a secondary panel does not poll on its own tick",
+  tick.fetched === 0 && tick.waiting === 1, JSON.stringify(tick));
+
+assert("a secondary panel stands down once the primary has published",
+  afterWaiting({lastDataMs: Date.now()}) === 0);
+
+// The failsafe: if the primary leaves with its monitor, nothing publishes.
+assert("a secondary panel takes over once shared data goes stale",
+  afterWaiting({lastDataMs: Date.now() - 200000, interval: 60000}) === 1);
+
+// At startup nothing has arrived yet, and the idle cadence is fifteen minutes,
+// so waiting for a whole interval to re-check would strand a cold secondary.
+assert("a secondary panel takes over if nothing ever arrives",
+  afterWaiting({lastDataMs: 0, interval: 900000}) === 1);
+
+// A panel promoted between the tick and the re-check fetches immediately.
+scheduled({lastDataMs: Date.now()});
+panelAt(0, 3);
+fetched = 0;
+root.refreshIfAbandoned();
+assert("a panel promoted while waiting polls at once", fetched === 1);
+
+panelAt(0, 3);
+assert("no panel polls without a league",
+  scheduled({leagueId: "", lastDataMs: 0}).fetched === 0);
+panelAt(2, 3);
+assert("no secondary takes over without a league",
+  afterWaiting({leagueId: "", lastDataMs: 0}) === 0);
+
+// Alerting and fetching are the same election, so one screen does both.
+panelAt(1, 3);
+assert("only the primary panel alerts", root.isAlertingPanel() === false);
+panelAt(0, 3);
+assert("the primary panel alerts", root.isAlertingPanel() === true);
+root.hostWidget = null;
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");

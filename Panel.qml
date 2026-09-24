@@ -14,6 +14,9 @@ Panel {
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
   property var data: null
+  // Data arriving from this panel or from a sibling is the signal that someone
+  // is still polling, so it is timestamped wherever it came from.
+  onDataChanged: root.lastDataMs = Date.now()
   property string errorText: ""
   property bool settingsOpen: false
   property bool loading: false
@@ -31,6 +34,9 @@ Panel {
   readonly property var selectedPlayer: root.playerById(root.selectedPlayerId)
   property string photoPath: ""
   property double lastHeartbeatMs: Date.now()
+  // When data last arrived, from this panel or from a sibling. A secondary
+  // panel reads it to tell whether anyone is still fetching.
+  property double lastDataMs: 0
   readonly property int maxTeams: 64
   readonly property int maxPlayersPerSection: 32
   readonly property int maxPayloadCharacters: 2097152
@@ -95,10 +101,31 @@ Panel {
   }
   // Only the first widget for this module alerts, so a multi-monitor bar raises
   // one alert per event rather than one per screen.
-  function isAlertingPanel() {
+  // A bar surface is built per monitor, so this panel exists once per screen.
+  // The first live widget for the module is the one that speaks for all of
+  // them: it fetches, and it raises alerts. Every other panel is fed by it.
+  function isPrimaryPanel() {
     if (!root.hostWidget || typeof root.hostWidget.siblingWidgets !== "function") return true
     var widgets = root.hostWidget.siblingWidgets()
     return !widgets || widgets.length === 0 || widgets[0] === root.hostWidget
+  }
+  function isAlertingPanel() { return root.isPrimaryPanel() }
+  // Scheduled refreshes go through here; refreshes the user asked for do not.
+  // Only the primary panel polls, because its result is published to every
+  // sibling. A secondary asks its standby timer to look again shortly, which
+  // is both how it stands down once the primary publishes and how it steps in
+  // if the primary left with its monitor and nothing ever arrives.
+  function refreshIfDue() {
+    if (root.leagueId === "") return
+    if (root.isPrimaryPanel()) { root.refresh(false); return }
+    if (!standbyTimer.running) standbyTimer.restart()
+  }
+  // Called by the standby timer once the primary has had its chance.
+  function refreshIfAbandoned() {
+    if (root.leagueId === "") return
+    if (root.isPrimaryPanel()) { root.refresh(false); return }
+    if (root.lastDataMs > 0 && Date.now() - root.lastDataMs <= root.adaptiveIntervalMs) return
+    root.refresh(false)
   }
   function resetAlertWatch() {
     root.scoreSnapshot = ({})
@@ -689,7 +716,16 @@ Panel {
     repeat: true
     running: root.leagueId !== ""
     triggeredOnStart: true
-    onTriggered: root.refresh(false)
+    onTriggered: root.refreshIfDue()
+  }
+  Timer {
+    id: standbyTimer
+    // Long enough that the primary has normally published by now, so no second
+    // fetch is made; short enough that a primary which has gone is noticed
+    // without waiting out a whole idle interval.
+    interval: 15000
+    repeat: false
+    onTriggered: root.refreshIfAbandoned()
   }
   SystemClock {
     id: heartbeat
@@ -697,7 +733,7 @@ Panel {
     onDateChanged: {
       var now = Date.now()
       // A large wall-clock jump means suspend/resume or a stalled session.
-      if (now - root.lastHeartbeatMs > 150000) root.refresh(false)
+      if (now - root.lastHeartbeatMs > 150000) root.refreshIfDue()
       root.lastHeartbeatMs = now
     }
   }
