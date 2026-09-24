@@ -52,6 +52,8 @@ const FUNCTIONS = [
   "scoringLabel", "scoringRate", "scoringRows",
   "opponentFor", "calculateMatchupState",
   "isPrimaryPanel", "refreshIfDue", "refreshIfAbandoned",
+  "buildLeagueMatchups", "buildLeagueStandings", "recordText", "viewMatchup",
+  "showView", "gameFor",
 ];
 
 const ROW_FUNCTIONS = ["paceAgainst"];
@@ -615,6 +617,88 @@ assert("only the primary panel alerts", root.isAlertingPanel() === false);
 panelAt(0, 3);
 assert("the primary panel alerts", root.isAlertingPanel() === true);
 root.hostWidget = null;
+
+// The league list is one row per matchup, the user's own first, built from the
+// games already in the payload. Rosters with no matchup are carried as a lone
+// side so a bye or an eliminated team still appears.
+root.maxTeams = 64;
+root.selectedRosterId = 3;
+root.data = {
+  teams: [
+    {roster_id: 1, name: "Zippers",  record: {wins: 1, losses: 1, ties: 0, points: 247.86, potential: 312.26}},
+    {roster_id: 3, name: "Kareem",   record: {wins: 2, losses: 0, ties: 0, points: 283.74, potential: 291.34}},
+    {roster_id: 6, name: "Loop",     record: {wins: 2, losses: 0, ties: 0, points: 300.00, potential: 330.00}},
+    {roster_id: 9, name: "Byes",     record: {wins: 0, losses: 2, ties: 1, points: 100.00, potential: 150.00}},
+  ],
+  games: [
+    {roster_id: 1, matchup_id: 1, points: 10, starters: [{game_status: {state: "pre"}}]},
+    {roster_id: 6, matchup_id: 2, points: 30, starters: [{game_status: {state: "in"}}]},
+    {roster_id: 3, matchup_id: 2, points: 20, starters: [{game_status: {state: "pre"}}]},
+    {roster_id: 4, matchup_id: 1, points: 40, starters: [{game_status: {state: "pre"}}]},
+    {roster_id: 9, matchup_id: null, points: 5, starters: [{game_status: {state: "pre"}}]},
+  ],
+};
+
+const rows = root.buildLeagueMatchups();
+assert("every matchup is listed once", rows.length === 3, JSON.stringify(rows.length));
+assert("the user's own matchup is listed first", rows[0].mine === true);
+assert("the user's own roster is on the left of their row",
+  rows[0].home.roster_id === 3 && rows[0].away.roster_id === 6);
+assert("other matchups are not marked as the user's",
+  rows.slice(1).every(r => r.mine === false));
+assert("a live matchup is reported as live", rows[0].state === "live");
+assert("a matchup yet to start is reported as upcoming",
+  rows.find(r => r.home.roster_id === 1 || r.away.roster_id === 1).state === "upcoming");
+
+const lone = rows.find(r => r.away === null);
+assert("a roster with no matchup is carried as a lone side",
+  Boolean(lone) && lone.home.roster_id === 9, JSON.stringify(rows.map(r => [r.home.roster_id, r.away && r.away.roster_id])));
+
+assert("buildLeagueMatchups tolerates an empty payload",
+  (root.data = null, root.buildLeagueMatchups().length === 0));
+
+// Standings order by record, then by points scored.
+root.data = {teams: [
+  {roster_id: 1, name: "B", record: {wins: 2, losses: 0, ties: 0, points: 100}},
+  {roster_id: 2, name: "A", record: {wins: 2, losses: 0, ties: 0, points: 200}},
+  {roster_id: 3, name: "C", record: {wins: 1, losses: 1, ties: 1, points: 900}},
+  {roster_id: 4, name: "D", record: {wins: 1, losses: 2, ties: 0, points: 950}},
+], games: []};
+root.selectedRosterId = 3;
+const table = root.buildLeagueStandings();
+assert("standings lead with the best record",
+  table.map(r => r.name).join("") === "ABCD", table.map(r => r.name).join(""));
+assert("points break a tied record", table[0].name === "A" && table[1].name === "B");
+assert("ties rank above a worse record", table[2].name === "C");
+assert("the user's own team is marked in the standings",
+  table[2].mine === true && table[0].mine === false);
+assert("buildLeagueStandings tolerates an empty payload",
+  (root.data = null, root.buildLeagueStandings().length === 0));
+
+assert("a record reads without ties when there are none",
+  root.recordText({wins: 2, losses: 1, ties: 0}) === "2-1");
+assert("a record includes ties when there are any",
+  root.recordText({wins: 2, losses: 1, ties: 1}) === "2-1-1");
+assert("recordText tolerates a missing row", root.recordText(null) === "");
+
+// Selecting a matchup only moves the panel body. Nothing that speaks for the
+// user may follow it, or the bar and the alerts would change with the view.
+root.view = "league";
+root.viewMatchup(6);
+assert("selecting a matchup shows the matchup view",
+  root.viewedRosterId === 6 && root.view === "matchup");
+assert("selecting the user's own roster still marks it as their own",
+  (root.viewMatchup(3), root.viewedRosterId === 3));
+assert("viewMatchup ignores a missing roster",
+  (root.viewMatchup(null), root.viewedRosterId === 0));
+
+assert("showView refuses a view that does not exist",
+  (root.showView("nonsense"), root.view === "matchup"));
+assert("showView accepts the league view",
+  (root.showView("league"), root.view === "league"));
+assert("showView accepts settings",
+  (root.showView("settings"), root.view === "settings"));
+root.view = "matchup";
 
 console.log(failures === 0 ? "\nAlert logic tests passed" : "\n" + failures + " FAILURES");
 if (failures > 0) throw new Error(failures + " alert logic failures");

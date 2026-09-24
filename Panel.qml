@@ -63,27 +63,44 @@ Panel {
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 2), 10) || 2) // retained for settings compatibility
   readonly property string syncState: data && data.sync_state ? String(data.sync_state) : "idle"
   readonly property int adaptiveIntervalMs: data && Number(data.next_refresh_seconds) > 0 ? Number(data.next_refresh_seconds) * 1000 : 900000
-  readonly property var myGame: gameFor(selectedRosterId)
+  // The scoreboard renders whichever matchup is being viewed, which is the
+  // user's own until they pick another from the league list. Everything that
+  // speaks for the user - the bar text, the alerts, the lead watch - stays on
+  // selectedRosterId, so browsing another matchup never changes what is
+  // reported or what raises a sound.
+  property int viewedRosterId: 0
+  readonly property int shownRosterId: viewedRosterId > 0 ? viewedRosterId : selectedRosterId
+  readonly property bool viewingOwnMatchup: shownRosterId === selectedRosterId
+  readonly property var myGame: gameFor(shownRosterId)
   readonly property var opponentGame: opponentFor(myGame)
-  readonly property real widestPlayerLabel: widestLineupLabel(myGame, opponentGame)
+  readonly property var ownGame: gameFor(selectedRosterId)
+  readonly property var ownOpponentGame: opponentFor(ownGame)
+  // Every matchup in the league, each listed once, with the unpaired rosters
+  // carried along so a bye or an eliminated side is still accounted for.
+  readonly property var leagueMatchups: buildLeagueMatchups()
+  readonly property var leagueStandings: buildLeagueStandings()
+  // Measured across every lineup in the league, not just the one on screen, so
+  // switching matchups does not resize the panel under the pointer.
+  readonly property real widestPlayerLabel: widestLeagueLabel()
   readonly property bool reservesProgressSpace: playerDisplayMode === "full" || playerDisplayMode === "progress"
   readonly property real desiredPanelWidth: Math.max(Style.space(620),
     Style.space(16) + 2 * (Style.space(34 + 4 + 4 + 42 + 8) + widestPlayerLabel
       + (reservesProgressSpace ? Style.space(52) : 0)))
-  readonly property string opponentName: opponentLabel || (opponentGame ? teamName(opponentGame.roster_id) : "OPP")
+  readonly property string opponentName: opponentLabel || (ownOpponentGame ? teamName(ownOpponentGame.roster_id) : "OPP")
   readonly property string opponentShort: opponentLabel || abbreviation(opponentName)
-  readonly property string matchupState: calculateMatchupState(myGame, opponentGame)
+  readonly property string matchupState: calculateMatchupState(ownGame, ownOpponentGame)
   readonly property string barStatusSuffix: matchupState === "live" ? " · ● LIVE" : (matchupState === "upcoming" ? " · UPCOMING" : "")
   readonly property bool hasOpponent: Boolean(myGame && opponentGame)
+  readonly property bool ownHasOpponent: Boolean(ownGame && ownOpponentGame)
   readonly property string barText: leagueId === "" ? "NFL SETUP" : (loading && !data ? "NFL …" :
-    (hasOpponent ? (shortName || "MY") + " " + score(myGame.points) + " – " + score(opponentGame.points) + " " + opponentShort + barStatusSuffix
-     : (myGame ? (shortName || "MY") + " " + score(myGame.points) + " · NO MATCHUP" + barStatusSuffix : "NFL SETUP")))
-  readonly property bool hasLiveScore: hasOpponent && (Number(myGame.points) > 0 || Number(opponentGame.points) > 0)
+    (ownHasOpponent ? (shortName || "MY") + " " + score(ownGame.points) + " – " + score(ownOpponentGame.points) + " " + opponentShort + barStatusSuffix
+     : (ownGame ? (shortName || "MY") + " " + score(ownGame.points) + " · NO MATCHUP" + barStatusSuffix : "NFL SETUP")))
+  readonly property bool hasLiveScore: ownHasOpponent && (Number(ownGame.points) > 0 || Number(ownOpponentGame.points) > 0)
   readonly property color positiveColor: colorMode === "performance" ? "#86b875" : Color.accent
   readonly property color negativeColor: colorMode === "performance" ? Color.urgent : Color.muted
   readonly property color barColor: colorMode === "minimal" || !hasLiveScore ? (bar ? bar.foreground : Color.foreground) :
-    (Number(myGame.points) > Number(opponentGame.points) ? positiveColor :
-     (Number(myGame.points) < Number(opponentGame.points) ? negativeColor : (bar ? bar.foreground : Color.foreground)))
+    (Number(ownGame.points) > Number(ownOpponentGame.points) ? positiveColor :
+     (Number(ownGame.points) < Number(ownOpponentGame.points) ? negativeColor : (bar ? bar.foreground : Color.foreground)))
 
   onLeagueIdChanged: resetAlertWatch()
   onSelectedRosterIdChanged: resetAlertWatch()
@@ -476,6 +493,13 @@ Panel {
     }
     return projectedPlayers > 0 ? total : null
   }
+  function widestLeagueLabel() {
+    if (!root.data || !root.data.games) return 0
+    var widest = 0
+    for (var i = 0; i < root.data.games.length; i++)
+      widest = Math.max(widest, root.widestLineupLabel(root.data.games[i], null))
+    return widest
+  }
   function widestLineupLabel(first, second) {
     var widest = 0
     var games = [first, second]
@@ -511,6 +535,56 @@ Panel {
     if (upcoming > 0) return "upcoming"
     if (completed > 0) return "final"
     return "idle"
+  }
+  // One entry per matchup, ordered with the user's own first so the list opens
+  // on the thing they came for. A roster with no matchup is carried as a lone
+  // side rather than dropped, which is how a bye or an eliminated team shows.
+  function buildLeagueMatchups() {
+    if (!root.data || !root.data.games) return []
+    var seen = ({})
+    var rows = []
+    for (var i = 0; i < root.data.games.length; i++) {
+      var game = root.data.games[i]
+      if (!game || seen[String(game.roster_id)]) continue
+      var foe = root.opponentFor(game)
+      seen[String(game.roster_id)] = true
+      if (foe) seen[String(foe.roster_id)] = true
+      var mine = game.roster_id === root.selectedRosterId
+        || Boolean(foe && foe.roster_id === root.selectedRosterId)
+      // Put the user's own roster on the left of their own row.
+      var home = mine && foe && foe.roster_id === root.selectedRosterId ? foe : game
+      var away = home === game ? foe : game
+      rows.push({home: home, away: away, mine: mine,
+                 state: root.calculateMatchupState(home, away)})
+    }
+    rows.sort(function(a, b) { return (b.mine ? 1 : 0) - (a.mine ? 1 : 0) })
+    return rows
+  }
+  // Standings as Sleeper orders them: record first, then points scored.
+  function buildLeagueStandings() {
+    if (!root.data || !root.data.teams) return []
+    var rows = root.data.teams.slice(0, root.maxTeams).map(function(team) {
+      var record = team.record || {}
+      return {roster_id: team.roster_id, name: team.name,
+              wins: Number(record.wins || 0), losses: Number(record.losses || 0),
+              ties: Number(record.ties || 0), points: Number(record.points || 0),
+              potential: Number(record.potential || 0),
+              mine: team.roster_id === root.selectedRosterId}
+    })
+    rows.sort(function(a, b) {
+      if (b.wins !== a.wins) return b.wins - a.wins
+      if (b.ties !== a.ties) return b.ties - a.ties
+      return b.points - a.points
+    })
+    return rows
+  }
+  function recordText(row) {
+    if (!row) return ""
+    return row.wins + "-" + row.losses + (Number(row.ties) > 0 ? "-" + row.ties : "")
+  }
+  function viewMatchup(rosterId) {
+    root.viewedRosterId = Number(rosterId) || 0
+    root.showView("matchup")
   }
   function gameFor(id) {
     if (!data || !data.games) return null
@@ -549,7 +623,7 @@ Panel {
     fetchProc.running = true
   }
   function open() { if (leagueId === "") root.showView("settings"); controller.show(); refresh(false) }
-  function close() { root.showView("matchup"); controller.hide() }
+  function close() { root.viewedRosterId = 0; root.showView("matchup"); controller.hide() }
   // Persist the settings entry. Every value is read from live panel state, and
   // `changes` overrides only the keys a caller is actually changing, so adding a
   // setting never means threading another argument through every call site.
@@ -580,7 +654,7 @@ Panel {
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
-  function persist(rosterId) { saveEntry({rosterId:rosterId}) }
+  function persist(rosterId) { root.viewedRosterId = 0; saveEntry({rosterId:rosterId}) }
   function setColorMode(mode) { saveEntry({colorMode:mode}) }
   function setPlayerDisplayMode(mode) { saveEntry({playerDisplayMode:mode}) }
   function setLeadAlert(enabled) {
@@ -631,6 +705,7 @@ Panel {
     errorText = ""
     settingsMessage = "Syncing league…"
     data = null
+    root.viewedRosterId = 0
     saveEntry({leagueId:id, rosterId:0})
     Qt.callLater(function() { refresh(true) })
   }
@@ -793,6 +868,36 @@ Panel {
               }
             }
           }
+            // Two bodies worth switching between; settings stays on the cog so
+            // a rarely used view does not take a permanent seat in the strip.
+            Row {
+              visible: root.leagueId !== "" && !root.settingsOpen
+              spacing: Style.space(6)
+              Repeater {
+                model: [{id: "matchup", label: "MATCHUP"}, {id: "league", label: "LEAGUE"}]
+                Rectangle {
+                  required property var modelData
+                  readonly property bool current: root.view === modelData.id
+                  width: tabLabel.implicitWidth + Style.space(22); height: Style.space(26)
+                  radius: Style.cornerRadius
+                  color: current ? Style.selectedFillFor(root.bar.foreground, Color.accent, Color.urgent)
+                                 : (tabArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent")
+                  Text {
+                    id: tabLabel
+                    anchors.centerIn: parent
+                    text: modelData.label; textFormat: Text.PlainText
+                    color: parent.current ? root.bar.foreground : Qt.darker(root.bar.foreground,1.5)
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+                    font.letterSpacing: 1; font.bold: parent.current
+                  }
+                  MouseArea {
+                    id: tabArea; anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.showView(modelData.id)
+                  }
+                }
+              }
+            }
 
           Column {
             visible: root.settingsOpen; width: parent.width; spacing: Style.space(12)
@@ -952,6 +1057,159 @@ Panel {
           // An empty half of the panel needs saying out loud. Sleeper leaves a
           // roster unpaired for a bye, for an odd league, and for a side that
           // did not reach the bracket once the playoffs begin.
+            // A row per matchup, the user's own first. Selecting one hands the
+            // matchup view a different roster rather than drawing a second
+            // scoreboard here, so every lineup, clock and pace mark is the
+            // same code that renders the user's own game.
+            Column {
+              visible: root.leagueOpen
+              width: parent.width; spacing: Style.space(8)
+
+              Text {
+                text: "MATCHUPS"; textFormat: Text.PlainText
+                color: Qt.darker(root.bar.foreground,1.5)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
+              }
+              Repeater {
+                model: root.leagueMatchups
+                Rectangle {
+                  required property var modelData
+                  width: parent.width; height: Style.space(34); radius: Style.cornerRadius
+                  color: rowArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent)
+                         : (modelData.mine ? Qt.rgba(Color.accent.r,Color.accent.g,Color.accent.b,.07) : "transparent")
+                  Text {
+                    anchors.left: parent.left; anchors.leftMargin: Style.space(10)
+                    anchors.right: rowScores.left; anchors.rightMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.teamName(modelData.home.roster_id); elide: Text.ElideRight
+                    textFormat: Text.PlainText; color: root.bar.foreground
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+                    font.bold: modelData.mine
+                  }
+                  Row {
+                    id: rowScores
+                    anchors.centerIn: parent; spacing: Style.space(8)
+                    Text {
+                      text: root.score(modelData.home.points); textFormat: Text.PlainText
+                      color: root.bar.foreground; font.family: root.bar.fontFamily
+                      font.pixelSize: Style.font.body; font.bold: true
+                    }
+                    Text {
+                      text: modelData.state === "live" ? "●" : "·"; textFormat: Text.PlainText
+                      color: modelData.state === "live" && root.colorMode !== "minimal"
+                             ? Color.accent : Qt.darker(root.bar.foreground,1.6)
+                      font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+                    }
+                    Text {
+                      visible: Boolean(modelData.away)
+                      text: modelData.away ? root.score(modelData.away.points) : ""
+                      textFormat: Text.PlainText
+                      color: root.bar.foreground; font.family: root.bar.fontFamily
+                      font.pixelSize: Style.font.body; font.bold: true
+                    }
+                  }
+                  Text {
+                    anchors.left: rowScores.right; anchors.leftMargin: Style.space(8)
+                    anchors.right: parent.right; anchors.rightMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    horizontalAlignment: Text.AlignRight
+                    text: modelData.away ? root.teamName(modelData.away.roster_id) : "No matchup"
+                    elide: Text.ElideRight; textFormat: Text.PlainText
+                    color: modelData.away ? root.bar.foreground : Qt.darker(root.bar.foreground,1.5)
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+                    font.bold: modelData.mine
+                  }
+                  MouseArea {
+                    id: rowArea; anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.viewMatchup(modelData.home.roster_id)
+                  }
+                }
+              }
+
+              Text {
+                text: "STANDINGS"; textFormat: Text.PlainText; topPadding: Style.space(8)
+                color: Qt.darker(root.bar.foreground,1.5)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
+              }
+              Repeater {
+                model: root.leagueStandings
+                Item {
+                  required property var modelData
+                  required property int index
+                  width: parent.width; height: Style.space(24)
+                  Text {
+                    anchors.left: parent.left; anchors.leftMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(24)
+                    text: (index + 1) + "."; textFormat: Text.PlainText
+                    color: Qt.darker(root.bar.foreground,1.6)
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+                  }
+                  Text {
+                    anchors.left: parent.left; anchors.leftMargin: Style.space(34)
+                    anchors.right: standingFigures.left; anchors.rightMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.name; elide: Text.ElideRight; textFormat: Text.PlainText
+                    color: modelData.mine ? root.bar.foreground : Qt.darker(root.bar.foreground,1.3)
+                    font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+                    font.bold: modelData.mine
+                  }
+                  Row {
+                    id: standingFigures
+                    anchors.right: parent.right; anchors.rightMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(14)
+                    Text {
+                      text: root.recordText(modelData); textFormat: Text.PlainText
+                      color: root.bar.foreground; font.family: root.bar.fontFamily
+                      font.pixelSize: Style.font.body
+                    }
+                    Text {
+                      width: Style.space(56); horizontalAlignment: Text.AlignRight
+                      text: Number(modelData.points).toFixed(1); textFormat: Text.PlainText
+                      color: Qt.darker(root.bar.foreground,1.4)
+                      font.family: root.bar.fontFamily; font.pixelSize: Style.font.body
+                    }
+                  }
+                }
+              }
+            }
+            // Viewing someone else's matchup is easy to forget you are doing,
+            // so it says whose it is and offers the way back.
+            Rectangle {
+              visible: root.matchupOpen && !root.viewingOwnMatchup && Boolean(root.myGame)
+              width: parent.width; height: visible ? Style.space(30) : 0
+              radius: Style.cornerRadius
+              color: Qt.rgba(root.bar.foreground.r,root.bar.foreground.g,root.bar.foreground.b,.06)
+              Text {
+                anchors.left: parent.left; anchors.leftMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Viewing " + root.teamName(root.shownRosterId)
+                textFormat: Text.PlainText; elide: Text.ElideRight
+                color: Qt.darker(root.bar.foreground,1.4)
+                font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+              }
+              Rectangle {
+                anchors.right: parent.right; anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+                width: backLabel.implicitWidth + Style.space(16); height: Style.space(22)
+                radius: Style.cornerRadius
+                color: backArea.containsMouse ? Style.hoverFillFor(root.bar.foreground, Color.accent) : "transparent"
+                Text {
+                  id: backLabel
+                  anchors.centerIn: parent
+                  text: "← Your matchup"; textFormat: Text.PlainText
+                  color: root.bar.foreground
+                  font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
+                }
+                MouseArea {
+                  id: backArea; anchors.fill: parent; hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.viewMatchup(root.selectedRosterId)
+                }
+              }
+            }
           Text {
             visible: root.matchupOpen && Boolean(root.myGame) && !root.hasOpponent
             width: parent.width; wrapMode: Text.WordWrap

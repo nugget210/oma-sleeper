@@ -334,7 +334,11 @@ readonly rosters_schema='type == "array" and length <= 64
     and ((.players // []) | type) == "array" and ((.players // []) | length) <= 64
     and all((.players // [])[]; (type == "string") and test("^[A-Za-z0-9_.-]{1,32}$"))
     and ((.starters // []) | type) == "array" and ((.starters // []) | length) <= 32
-    and all((.starters // [])[]; (type == "string") and test("^[A-Za-z0-9_.-]{1,32}$")))'
+    and all((.starters // [])[]; (type == "string") and test("^[A-Za-z0-9_.-]{1,32}$"))
+    and ((.settings // {}) | type) == "object"
+    and all((.settings // {}) | to_entries[];
+      (.key | type) == "string" and (.key | test("^[A-Za-z0-9_]{1,64}$"))
+      and ((.value == null) or ((.value | type) == "number" and .value >= -1000000 and .value <= 1000000))))'
 readonly matchups_schema='type == "array" and length <= 64
   and all(.[];
     type == "object" and length <= 64
@@ -626,7 +630,19 @@ jq -n \
      game_status:game_status(($player_data.team // $id)[0:8]),
      stats:stat_line($id), scoring:scoring($id), season:season_line($id), bio:bio($id)};
   [$league.roster_positions[0:$max_starters][] | select(. != "BN")] as $slots |
-  [$rosters[0:$max_teams][] | {roster_id, name:teamname(.roster_id)}] as $teams |
+  # The season record travels with the roster, so standings need no extra
+  # request. Sleeper splits points into a whole part and a decimal part.
+  def number_or($value; $fallback):
+    if ($value | type) == "number" then $value else $fallback end;
+  def roster_record($settings):
+    ($settings // {}) as $s |
+    {wins: number_or($s.wins; 0), losses: number_or($s.losses; 0),
+     ties: number_or($s.ties; 0),
+     points: ((number_or($s.fpts; 0) + (number_or($s.fpts_decimal; 0) / 100)) * 100 | round / 100),
+     against: ((number_or($s.fpts_against; 0) + (number_or($s.fpts_against_decimal; 0) / 100)) * 100 | round / 100),
+     potential: ((number_or($s.ppts; 0) + (number_or($s.ppts_decimal; 0) / 100)) * 100 | round / 100)};
+  [$rosters[0:$max_teams][] |
+    {roster_id, name:teamname(.roster_id), record:roster_record(.settings)}] as $teams |
   [$matchups[0:$max_teams][] |
     {roster_id, matchup_id, points:(.custom_points // .points // 0),
      starters:[range(0; ([((.starters // []) | length), $max_starters] | min)) as $index |
@@ -643,6 +659,9 @@ readonly output_schema='type == "object"
   and (.league_id | type) == "string" and (.league_id | test("^[0-9]{10,24}$"))
   and (.week | type) == "number" and (.week >= 1 and .week <= 18)
   and (.teams | type) == "array" and (.teams | length) <= 64
+  and all(.teams[];
+    (.record | type) == "object"
+    and all(.record | to_entries[]; (.value | type) == "number"))
   and (.games | type) == "array" and (.games | length) <= 64
   and all(.games[];
     (.starters | type) == "array" and (.starters | length) <= 32
