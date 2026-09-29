@@ -25,6 +25,7 @@ required_files=(
   tests/test-qml-safety.sh
   tests/test-scoreboard-schema.sh
   tests/test-cache-race.sh
+  tests/test-cache-ages.sh
   tests/test-week-selection.sh
   tests/test-game-status.sh
   tests/test-postseason-week.sh

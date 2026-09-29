@@ -450,7 +450,13 @@ season="$(bounded_uint "$season_raw" 2000 2100 season)"
 cache_fetch "users-$league_id" 3600 "$api/league/$league_id/users" "$MAX_USERS_BYTES" "$users_schema" \
   || die "invalid league users response"
 users_file="$CACHE_FILE"
-cache_fetch "rosters-$league_id" 3600 "$api/league/$league_id/rosters" "$MAX_ROSTERS_BYTES" "$rosters_schema" \
+# Rosters are held far more briefly than the league and its users beside them,
+# because they carry the season record the standings are drawn from. That record
+# turns over when a round is finalised, which is an unpredictable moment and
+# exactly when someone looks at the ladder. Held for an hour, the ladder showed
+# the previous round for up to an hour after the results were in. The response
+# is five kilobytes, so asking more often costs nothing worth keeping.
+cache_fetch "rosters-$league_id" 300 "$api/league/$league_id/rosters" "$MAX_ROSTERS_BYTES" "$rosters_schema" \
   || die "invalid league rosters response"
 rosters_file="$CACHE_FILE"
 download_json "$api/league/$league_id/matchups/$week" "$MAX_MATCHUPS_BYTES" "$matchups_schema" || die "invalid matchup response"
