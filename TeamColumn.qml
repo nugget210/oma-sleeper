@@ -11,6 +11,7 @@ Column {
   property var bar: null
   property string colorMode: "theme"
   property string playerDisplayMode: "full"
+  property double nowMs: Date.now()
   // A team can be shown without an opponent: a bye, an odd league, or a side
   // eliminated before the league's final week. There is nothing to lead or
   // trail in that case, so the comparison rail and the direction arrows are
@@ -44,7 +45,7 @@ Column {
     }
   }
   Text { text: "STARTERS"; textFormat: Text.PlainText; color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
-  Repeater { model: root.game ? root.game.starters : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode; onActivated: root.playerActivated(modelData) } }
+  Repeater { model: root.game ? root.game.starters : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode; nowMs: root.nowMs; onActivated: root.playerActivated(modelData) } }
   Text { text: "BENCH"; textFormat: Text.PlainText; topPadding: Style.space(8); color: Qt.darker(root.bar.foreground,1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
-  Repeater { model: root.game ? root.game.bench : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode; onActivated: root.playerActivated(modelData) } }
+  Repeater { model: root.game ? root.game.bench : []; PlayerRow { required property var modelData; width: root.width; player: modelData; bar: root.bar; colorMode: root.colorMode; displayMode: root.playerDisplayMode; nowMs: root.nowMs; onActivated: root.playerActivated(modelData) } }
 }

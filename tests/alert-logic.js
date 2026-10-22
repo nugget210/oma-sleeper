@@ -57,7 +57,7 @@ const FUNCTIONS = [
   "countdownTo", "nextStarterKickoff", "kickoffText",
 ];
 
-const ROW_FUNCTIONS = ["paceAgainst"];
+const ROW_FUNCTIONS = ["paceAgainst", "kicksOffWithin", "startsIn"];
 
 // Stand-ins for the QML objects the functions touch.
 const alertProc = { running: false, soundPath: "" };
@@ -826,6 +826,38 @@ assert("a starter with no kickoff time is skipped",
 
 assert("nextStarterKickoff tolerates a missing lineup",
   root.nextStarterKickoff(null) === 0 && root.nextStarterKickoff({}) === 0);
+
+// A row is highlighted from two hours before its game kicks off, as a live one
+// is, so the lineup shows who is about to play.
+const TWO_HOURS = 2 * 3600 * 1000;
+const soon = (state, kickoffMs) => row.kicksOffWithin(
+  {state: state, kickoff: kickoffMs === null ? null : (T0 + kickoffMs) / 1000}, T0, TWO_HOURS);
+
+assert("a game kicking off within two hours is highlighted",
+  soon("pre", 55 * 60 * 1000) && soon("pre", TWO_HOURS));
+assert("a game further out than two hours is not",
+  !soon("pre", TWO_HOURS + 60 * 1000));
+assert("a game past its kickoff but not yet live stays highlighted",
+  soon("pre", -5 * 60 * 1000));
+assert("a live or finished game is not counted as upcoming",
+  !soon("in", 60 * 1000) && !soon("post", 60 * 1000));
+assert("a game with no kickoff time is not highlighted",
+  !soon("pre", null) && !row.kicksOffWithin({state: "pre", kickoff: 0}, T0, TWO_HOURS)
+    && !row.kicksOffWithin(null, T0, TWO_HOURS));
+
+// The row shows the time to kickoff, and has to agree with the bar when both
+// are counting down to the same game.
+const startsIn = s => row.startsIn({state: "pre", kickoff: (T0 + s * 1000) / 1000}, T0);
+assert("a row reads hours and minutes to kickoff",
+  startsIn(3600 + 25 * 60) === "1h 25m" && startsIn(2 * 3600) === "2h 0m");
+assert("a row reads minutes alone in the last hour",
+  startsIn(51 * 60 + 40) === "51m" && startsIn(20) === "1m");
+let disagreements = [];
+for (let s = 1; s <= 2 * 3600; s += 7) if (startsIn(s) !== inS(s)) disagreements.push(s);
+assert("a row's countdown agrees with the bar's across the window",
+  disagreements.length === 0, disagreements.slice(0, 3).join(","));
+assert("a row past its kickoff but not yet live reads KICKOFF",
+  startsIn(0) === "KICKOFF" && startsIn(-300) === "KICKOFF");
 
 // The card shows a clock time only for a game still to come.
 assert("a player already playing shows no kickoff time",
