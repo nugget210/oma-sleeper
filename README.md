@@ -40,8 +40,8 @@ omarchy plugin remove nugget210.oma-sleeper
 ## Features
 
 - **Live scoreboard** — both lineups side by side, starters and bench, with positions, NFL teams, and live fantasy points.
-- **Live highlighting** — every player whose NFL game is on right now gets a tinted row, an accent edge, and a slow pulse, so you can see at a glance who is currently earning points. Team defences too.
-- **Game clocks** — active players show the quarter, the clock, and a progress rail.
+- **Live highlighting** — every player whose NFL game is on right now, or kicks off within two hours, gets a tinted row, an accent edge, and a slow pulse, so you can see at a glance who is earning points and who is next. Team defences too.
+- **Game clocks** — active players show the quarter, the clock, and a progress rail; players about to kick off show the time to go, `1h 25m` then `28m`.
 - **Projected totals** — each team header shows its projected final score, composed the way the Sleeper app composes it: points already banked plus a projection for every player yet to kick off.
 - **Pace arrows** — once a game is a tenth played, `▲` / `●` / `▼` show whether a starter is running above, on, or below the share of their projection the game has reached.
 - **Scoring breakdown** — the player card itemises what earned the points, in plain English, against your league's own scoring rules.
